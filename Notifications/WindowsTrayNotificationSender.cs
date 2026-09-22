@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows.Threading;
 using Forms = System.Windows.Forms;
 
@@ -27,6 +28,7 @@ public sealed class WindowsTrayNotificationSender : INotificationSender
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _trayIcon.ShowBalloonTip(5000, title, message, Forms.ToolTipIcon.Info);
+                Trace.TraceInformation("Notification submitted to Windows.");
             },
             DispatcherPriority.Normal,
             cancellationToken).Task;

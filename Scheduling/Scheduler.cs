@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace PersonalDesktopHelper.Scheduling;
 
 public sealed class Scheduler : IAsyncDisposable
@@ -71,6 +73,7 @@ public sealed class Scheduler : IAsyncDisposable
         }
 
         OnTasksChanged();
+        Trace.TraceInformation("Scheduled task added: '{0}' ({1}), handler '{2}'.", name, id, handlerId);
         return id;
     }
 
@@ -164,6 +167,7 @@ public sealed class Scheduler : IAsyncDisposable
         }
 
         OnTasksChanged();
+        Trace.TraceInformation("Scheduled task {0} enabled: {1}.", id, enabled);
     }
 
     public void DeleteTask(Guid id)
@@ -179,6 +183,7 @@ public sealed class Scheduler : IAsyncDisposable
         }
 
         OnTasksChanged();
+        Trace.TraceInformation("Scheduled task deleted: {0}.", id);
     }
 
     private void AddRegistration(ScheduledTaskState state)
@@ -252,6 +257,7 @@ public sealed class Scheduler : IAsyncDisposable
                     }
 
                     OnTasksChanged();
+                    Trace.TraceInformation("Scheduled task starting: '{0}' ({1}).", task.State.Name, task.State.Id);
                     try
                     {
                         await action!(cancellationToken).ConfigureAwait(false);
@@ -272,6 +278,7 @@ public sealed class Scheduler : IAsyncDisposable
                         }
 
                         OnTasksChanged();
+                        Trace.TraceInformation("Scheduled task run ended: '{0}' ({1}).", task.State.Name, task.State.Id);
                     }
 
                     lock (_gate)

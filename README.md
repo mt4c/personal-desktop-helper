@@ -119,6 +119,26 @@ app.Scheduler.SetEnabled(reminderId, false);
   before invoking callbacks to prevent completed one-shots from replaying after
   a restart; this does not guarantee execution if the process crashes mid-run.
 
+## Logging
+
+The application writes timestamped UTC logs to:
+
+```text
+%LOCALAPPDATA%\PersonalDesktopHelper\logs\desktop-helper-yyyyMMdd-processId.log
+```
+
+Files roll over daily (UTC) and are flushed after each entry. Startup, shutdown,
+notification setting changes and delivery requests, scheduler activity, skipped
+tasks, persistence errors and unhandled exceptions are recorded. Notification
+bodies are not logged. Modules can use the standard `System.Diagnostics.Trace`
+information, warning and error methods.
+
+An asynchronous cleanup task starts on every boot without blocking the UI. It
+deletes only matching application log files whose last-write time is strictly
+older than seven days. Recent logs, unrelated files, subdirectories and links are
+left alone. Cleanup failures are logged and do not prevent other expired files
+from being processed; logging write failures are surfaced in a dialog.
+
 Run automated tests with:
 
 ```powershell

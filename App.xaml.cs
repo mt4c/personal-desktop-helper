@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using PersonalDesktopHelper.Logging;
 using PersonalDesktopHelper.Notifications;
 using PersonalDesktopHelper.Persistence;
 using PersonalDesktopHelper.Scheduling;
@@ -21,6 +22,9 @@ public partial class App : System.Windows.Application
     private bool _isQuitting;
     private readonly string _statePath;
     private Forms.ToolStripMenuItem? _notificationsItem;
+    private DailyFileTraceListener? _fileLog;
+    private readonly CancellationTokenSource _cleanupCancellation = new();
+    private Task? _logCleanup;
 
     public App() : this(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -44,6 +48,7 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
         try
         {
+            InitializeLogging();
             var skipped = InitializeServices();
             ShowMainWindow();
             await SkippedTaskNotification.SendAsync(Notifications, skipped);
@@ -51,15 +56,67 @@ public partial class App : System.Windows.Application
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
         {
             System.Windows.MessageBox.Show(
-                $"Unable to load or save application settings at {_statePath}.\n\n{error.Message}",
-                "Settings error", MessageBoxButton.OK, MessageBoxImage.Error);
+                $"Unable to initialize the application using {_statePath}.\n\n{error.Message}",
+                "Startup error", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
+    }
+
+    private void InitializeLogging()
+    {
+        var directory = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_statePath))!, "logs");
+        _fileLog = new DailyFileTraceListener(directory, error =>
+        {
+            if (!Dispatcher.HasShutdownStarted)
+            {
+                Dispatcher.BeginInvoke(() => System.Windows.MessageBox.Show(
+                    $"Unable to write application logs in {directory}.\n\n{error.Message}",
+                    "Logging error", MessageBoxButton.OK, MessageBoxImage.Error));
+            }
+        });
+        Trace.Listeners.Add(_fileLog);
+        DispatcherUnhandledException += OnDispatcherException;
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+        Trace.TraceInformation("Application starting.");
+        _logCleanup = CleanupLogsAsync(directory, _cleanupCancellation.Token);
+    }
+
+    private static async Task CleanupLogsAsync(string directory, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await LogRetention.CleanupAsync(
+                directory, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+            Trace.TraceInformation("Startup log cleanup removed {0} file(s).", result.DeletedCount);
+            foreach (var failure in result.Failures)
+            {
+                Trace.TraceWarning("Could not remove expired log '{0}': {1}", failure.Path, failure.Error);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Trace.TraceInformation("Startup log cleanup cancelled during shutdown.");
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceError("Startup log cleanup failed: {0}", error);
+        }
+    }
+
+    private void OnDispatcherException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        Trace.TraceError("Unhandled UI exception: {0}", e.Exception);
+    }
+
+    private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        Trace.TraceError("Unhandled application exception: {0}", e.ExceptionObject);
     }
 
     private IReadOnlyList<ScheduledTaskState> InitializeServices()
     {
         var store = new JsonStateStore(_statePath);
+        Trace.TraceInformation("Loaded application state. New profile: {0}; saved tasks: {1}.", store.IsNew, store.State.Tasks.Count);
         _trayMenu = new Forms.ContextMenuStrip();
         _trayMenu.Items.Add("Options", null, (_, _) => ShowOptionsWindow());
         _notificationsItem = new Forms.ToolStripMenuItem("Notifications")
@@ -99,6 +156,10 @@ public partial class App : System.Windows.Application
         var currentTimeTask = new CurrentTimeNotificationTask(Notifications);
         Scheduler.RegisterHandler("current-time-notification", currentTimeTask.RunAsync);
         var skipped = Scheduler.RestoreTasks(store.State.Tasks);
+        foreach (var task in skipped)
+        {
+            Trace.TraceWarning("Skipped missed run for task '{0}' ({1}).", task.Name, task.Id);
+        }
         if (store.IsNew)
         {
             Scheduler.AddTask(
@@ -132,6 +193,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
+            Trace.TraceError("Could not save notification setting: {0}", error);
             _notificationsItem!.Checked = Notifications.IsEnabled;
             System.Windows.MessageBox.Show(
                 $"The notification setting could not be saved.\n\n{error.Message}",
@@ -147,6 +209,7 @@ public partial class App : System.Windows.Application
         }
 
         _isQuitting = true;
+        Trace.TraceInformation("Quit requested.");
         if (_trayMenu is not null)
         {
             _trayMenu.Enabled = false;
@@ -157,6 +220,12 @@ public partial class App : System.Windows.Application
             if (_scheduler is not null)
             {
                 await _scheduler.DisposeAsync();
+            }
+
+            _cleanupCancellation.Cancel();
+            if (_logCleanup is not null)
+            {
+                await _logCleanup;
             }
         }
         finally
@@ -202,6 +271,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _scheduler?.RequestStop();
+        _cleanupCancellation.Cancel();
         if (_notifications is not null)
         {
             _notifications.PropertyChanged -= OnNotificationStateChanged;
@@ -214,6 +284,16 @@ public partial class App : System.Windows.Application
 
         _trayMenu?.Dispose();
         _applicationIcon?.Dispose();
+        Trace.TraceInformation("Application stopped.");
+        DispatcherUnhandledException -= OnDispatcherException;
+        AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
+        if (_fileLog is not null)
+        {
+            Trace.Listeners.Remove(_fileLog);
+            _fileLog.Dispose();
+        }
+
+        _cleanupCancellation.Dispose();
         base.OnExit(e);
     }
 }

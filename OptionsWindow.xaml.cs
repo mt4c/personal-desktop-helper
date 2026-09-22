@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -103,6 +104,7 @@ public partial class OptionsWindow : Window
         catch (Exception error) when (error is IOException or UnauthorizedAccessException
             or InvalidOperationException or KeyNotFoundException)
         {
+            Trace.TraceError("Could not apply options change: {0}", error);
             System.Windows.MessageBox.Show(this, $"The change could not be saved.\n\n{error.Message}",
                 "Options error", MessageBoxButton.OK, MessageBoxImage.Error);
         }

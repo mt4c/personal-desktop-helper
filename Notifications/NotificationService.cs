@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 
 namespace PersonalDesktopHelper.Notifications;
 
@@ -30,6 +31,7 @@ public sealed class NotificationService(
             }
 
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEnabled)));
+            Trace.TraceInformation("Notifications enabled: {0}.", value);
         }
     }
 

@@ -88,6 +88,10 @@ public sealed class DesktopLifecycleTests
                 Assert.False(tray.Visible);
                 Assert.NotNull(pending);
                 Assert.True(pending.IsCompletedSuccessfully);
+                var log = File.ReadAllText(Assert.Single(Directory.GetFiles(Path.Combine(stateDirectory, "logs"), "*.log")));
+                Assert.Contains("Application starting.", log);
+                Assert.Contains("Application stopped.", log);
+                Assert.Contains("Startup log cleanup", log);
                 completed.SetResult();
             }
             catch (Exception error)
