@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using PersonalDesktopHelper.Notifications;
 using PersonalDesktopHelper.Scheduling;
+using PersonalDesktopHelper.Copilot;
 
 namespace PersonalDesktopHelper.Views;
 
@@ -12,13 +13,17 @@ public partial class OptionsWindow : Window
 {
     private readonly NotificationService _notifications;
     private readonly Scheduler _scheduler;
+    private readonly ChatViewModel _chat;
     private bool _isClosed;
 
-    public OptionsWindow(NotificationService notifications, Scheduler scheduler, string statePath)
+    public OptionsWindow(NotificationService notifications, Scheduler scheduler, string statePath, ChatViewModel chat)
     {
         _notifications = notifications;
         _scheduler = scheduler;
+        _chat = chat;
         InitializeComponent();
+        CopilotPanel.DataContext = chat;
+        CopilotModelComboBox.Text = chat.Settings.Model;
         StoragePathText.Text = $"Changes are saved automatically to {statePath}";
         _notifications.PropertyChanged += OnNotificationChanged;
         _scheduler.TasksChanged += OnTasksChanged;
@@ -30,6 +35,64 @@ public partial class OptionsWindow : Window
         };
         RefreshControls();
     }
+
+    public void SelectCopilotTab() => OptionsTabs.SelectedItem = CopilotTab;
+
+    private CopilotSettings ReadCopilotSettings() => new()
+    {
+        Model = CopilotModelComboBox.Text.Trim()
+    };
+
+    private async void OnSignInCopilotClick(object sender, RoutedEventArgs e)
+    {
+        var settings = ReadCopilotSettings();
+        if (settings != _chat.Settings && !await _chat.ApplySettingsAsync(settings))
+        {
+            return;
+        }
+
+        await _chat.SignInAsync();
+    }
+
+    private async void OnSignOutCopilotClick(object sender, RoutedEventArgs e) => await _chat.SignOutAsync();
+
+    private void OnOpenSignInPageClick(object sender, RoutedEventArgs e)
+    {
+        if (_chat.VerificationUri is not { } uri)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException)
+        {
+            System.Windows.MessageBox.Show(this,
+                $"Could not open your browser. Open {uri} manually and enter the displayed code.\n\n{error.Message}",
+                "GitHub sign-in", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async void OnSaveCopilotClick(object sender, RoutedEventArgs e)
+    {
+        await _chat.ApplySettingsAsync(ReadCopilotSettings());
+    }
+
+    private async void OnConnectCopilotClick(object sender, RoutedEventArgs e)
+    {
+        var settings = ReadCopilotSettings();
+        if (settings != _chat.Settings && !await _chat.ApplySettingsAsync(settings))
+        {
+            return;
+        }
+
+        await _chat.ConnectAsync();
+    }
+
+    private async void OnDisconnectCopilotClick(object sender, RoutedEventArgs e) => await _chat.DisconnectAsync();
+    private void OnStopCopilotClick(object sender, RoutedEventArgs e) => _chat.RequestStop();
 
     private void RefreshControls()
     {

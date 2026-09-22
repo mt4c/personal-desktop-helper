@@ -8,7 +8,7 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <TabControl>
+        <TabControl x:Name="OptionsTabs">
             <TabItem Header="Notifications">
                 <StackPanel Margin="16">
                     <CheckBox x:Name="NotificationsCheckBox" Content="Show notifications"
@@ -44,6 +44,46 @@
                     <TextBlock Grid.Row="2" Margin="0,12,0,0" TextWrapping="Wrap"
                                Text="Disabling or deleting a task prevents future runs. A run already in progress is allowed to finish. Missed runs are skipped on startup." />
                 </Grid>
+            </TabItem>
+            <TabItem x:Name="CopilotTab" Header="Copilot">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="CopilotPanel" Margin="16">
+                        <TextBlock Text="Sign in to GitHub to use your Copilot subscription."
+                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,14" TextWrapping="Wrap"
+                                   Text="Sign in displays a device code. Open the GitHub sign-in page and authorize the app. Your saved sign-in is encrypted for this Windows user, separately from settings." />
+                        <StackPanel IsEnabled="{Binding CanConfigure}">
+                            <TextBlock Text="Chat model (leave blank for automatic selection; connect to load available models)" />
+                            <ComboBox x:Name="CopilotModelComboBox" IsEditable="True"
+                                      ItemsSource="{Binding Models}" Margin="0,5,0,12" Padding="6" />
+                        </StackPanel>
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Saving changed settings starts a new chat. This chat does not grant Copilot permission to run commands or modify files." />
+                        <WrapPanel Margin="0,12,0,12">
+                            <Button Content="Sign in" Padding="12,5" Margin="0,0,8,0"
+                                    IsEnabled="{Binding CanConfigure}" Click="OnSignInCopilotClick" />
+                            <Button Content="Sign out" Padding="12,5" Margin="0,0,8,0"
+                                    IsEnabled="{Binding CanConfigure}" Click="OnSignOutCopilotClick" />
+                            <Button x:Name="SaveCopilotSettingsButton" Content="Save settings" Padding="12,5" Margin="0,0,8,0"
+                                    IsEnabled="{Binding CanConfigure}" Click="OnSaveCopilotClick" />
+                            <Button Content="Connect" Padding="12,5" Margin="0,0,8,0"
+                                    IsEnabled="{Binding CanConfigure}" Click="OnConnectCopilotClick" />
+                            <Button Content="Disconnect" Padding="12,5" Margin="0,0,8,0"
+                                    IsEnabled="{Binding CanDisconnect}" Click="OnDisconnectCopilotClick" />
+                            <Button Content="Stop" Padding="12,5"
+                                    IsEnabled="{Binding IsBusy}" Click="OnStopCopilotClick" />
+                        </WrapPanel>
+                        <DockPanel Margin="0,0,0,12">
+                            <Button DockPanel.Dock="Right" Content="Open sign-in page" Padding="12,5"
+                                    IsEnabled="{Binding HasDeviceCode}" Click="OnOpenSignInPageClick" />
+                            <TextBox Text="{Binding UserCode, Mode=OneWay}" IsReadOnly="True"
+                                     FontSize="18" FontWeight="SemiBold" Padding="6" Margin="0,0,8,0"
+                                     ToolTip="Copy this code and enter it on the GitHub sign-in page." />
+                        </DockPanel>
+                        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="DimGray" />
+                        <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" Foreground="Firebrick" Margin="0,8,0,0" />
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
         </TabControl>
         <TextBlock x:Name="StoragePathText" Grid.Row="1" Margin="0,12,0,0"

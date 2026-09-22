@@ -44,6 +44,10 @@ ScaffoldingReadMe.txt
 # dotenv environment variables file
 .env
 
+# Copilot authentication data
+copilot-auth.dat
+copilot-auth.dat.*.tmp
+
 # Others
 ~$*
 *~

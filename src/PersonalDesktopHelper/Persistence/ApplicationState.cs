@@ -1,4 +1,5 @@
 using System.IO;
+using PersonalDesktopHelper.Copilot;
 using PersonalDesktopHelper.Scheduling;
 
 namespace PersonalDesktopHelper.Persistence;
@@ -8,6 +9,7 @@ public sealed record ApplicationState
     public required int Version { get; init; }
     public required bool NotificationsEnabled { get; init; }
     public required IReadOnlyList<ScheduledTaskState> Tasks { get; init; }
+    public CopilotSettings Copilot { get; init; } = new();
 
     public static ApplicationState Default => new()
     {
@@ -22,6 +24,13 @@ public sealed record ApplicationState
         {
             throw new InvalidDataException($"Unsupported settings version: {Version}.");
         }
+
+        if (Copilot is null)
+        {
+            throw new InvalidDataException("Copilot settings must not be null.");
+        }
+
+        Copilot.Validate();
 
         if (Tasks is null || Tasks.Any(task => task is null))
         {

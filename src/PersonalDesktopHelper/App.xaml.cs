@@ -7,6 +7,7 @@ using PersonalDesktopHelper.Notifications;
 using PersonalDesktopHelper.Persistence;
 using PersonalDesktopHelper.Scheduling;
 using PersonalDesktopHelper.Views;
+using PersonalDesktopHelper.Copilot;
 using Forms = System.Windows.Forms;
 
 namespace PersonalDesktopHelper;
@@ -26,6 +27,7 @@ public partial class App : System.Windows.Application
     private DailyFileTraceListener? _fileLog;
     private readonly CancellationTokenSource _cleanupCancellation = new();
     private Task? _logCleanup;
+    private ChatViewModel? _chat;
 
     public App() : this(Path.Combine(AppContext.BaseDirectory, "state.json"))
     {
@@ -40,6 +42,9 @@ public partial class App : System.Windows.Application
         ?? throw new InvalidOperationException("The application has not started.");
 
     public Scheduler Scheduler => _scheduler
+        ?? throw new InvalidOperationException("The application has not started.");
+
+    public ChatViewModel Chat => _chat
         ?? throw new InvalidOperationException("The application has not started.");
 
     protected override async void OnStartup(StartupEventArgs e)
@@ -115,6 +120,23 @@ public partial class App : System.Windows.Application
     private IReadOnlyList<ScheduledTaskState> InitializeServices()
     {
         var store = new JsonStateStore(_statePath);
+        var credentialPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_statePath))!, "copilot-auth.dat");
+        _chat = new ChatViewModel(
+            new CopilotHttpConnection(new ProtectedCopilotCredentialStore(credentialPath)),
+            store.State.Copilot, store.SetCopilotSettings, action =>
+            {
+                if (!Dispatcher.HasShutdownStarted)
+                {
+                    if (Dispatcher.CheckAccess())
+                    {
+                        action();
+                    }
+                    else
+                    {
+                        Dispatcher.BeginInvoke(action);
+                    }
+                }
+            });
         Trace.TraceInformation("Loaded application state. New profile: {0}; saved tasks: {1}.", store.IsNew, store.State.Tasks.Count);
         _trayMenu = new Forms.ContextMenuStrip();
         _trayMenu.Items.Add("Options", null, (_, _) => ShowOptionsWindow());
@@ -221,6 +243,11 @@ public partial class App : System.Windows.Application
                 await _scheduler.DisposeAsync();
             }
 
+            if (_chat is not null)
+            {
+                await _chat.DisposeAsync();
+            }
+
             _cleanupCancellation.Cancel();
             if (_logCleanup is not null)
             {
@@ -237,7 +264,7 @@ public partial class App : System.Windows.Application
     {
         if (_mainWindow is null)
         {
-            _mainWindow = new MainWindow();
+            _mainWindow = new MainWindow(Chat, () => ShowOptionsWindow(selectCopilot: true));
             _mainWindow.Closed += (_, _) => _mainWindow = null;
             MainWindow = _mainWindow;
         }
@@ -245,12 +272,17 @@ public partial class App : System.Windows.Application
         ShowAndActivate(_mainWindow);
     }
 
-    private void ShowOptionsWindow()
+    private void ShowOptionsWindow(bool selectCopilot = false)
     {
         if (_optionsWindow is null)
         {
-            _optionsWindow = new OptionsWindow(_notifications!, Scheduler, _statePath);
+            _optionsWindow = new OptionsWindow(_notifications!, Scheduler, _statePath, Chat);
             _optionsWindow.Closed += (_, _) => _optionsWindow = null;
+        }
+
+        if (selectCopilot)
+        {
+            _optionsWindow.SelectCopilotTab();
         }
 
         ShowAndActivate(_optionsWindow);
@@ -270,6 +302,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _scheduler?.RequestStop();
+        _chat?.RequestStop();
         _cleanupCancellation.Cancel();
         if (_notifications is not null)
         {

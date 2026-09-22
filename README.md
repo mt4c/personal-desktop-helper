@@ -25,6 +25,7 @@ src\
     App.xaml / App.xaml.cs       Application startup, tray and lifetime
     Assets\                      Application icon
     Views\                       Main and options windows
+    Copilot\                     GitHub sign-in, protected credentials and chat
     Notifications\               Notification service and Windows delivery
     Scheduling\                  Schedules, task management and demo task
     Persistence\                 JSON state model and atomic file storage
@@ -33,6 +34,7 @@ src\
 tests\
   PersonalDesktopHelper.Tests\
     Desktop\                     Window and tray integration coverage
+    Copilot\                     Authentication, chat and credential storage
     Logging\                     Log output and retention coverage
     Notifications\               Notification behavior
     Persistence\                 State loading and saving
@@ -49,7 +51,8 @@ Closing all windows leaves the application running in the tray.
 - Right-click the tray icon and select **Options** to open or activate the
   options window. Its **Notifications** tab controls notification delivery.
   Its **Scheduler** tab lists tasks, schedules, status and next-run times, with
-  controls to enable, disable or delete the selected task.
+  controls to enable, disable or delete the selected task. Its **Copilot** tab
+  manages GitHub sign-in, chat model selection and connection status.
 - Toggle **Notifications** in the tray menu to enable or disable notifications.
   This stays synchronized with the checkbox in Options.
 - Select **Quit** from the tray menu to exit the application.
@@ -60,6 +63,45 @@ opened from the tray. Windows may place the tray icon in its hidden-icons area.
 Window layouts are defined in `src\PersonalDesktopHelper\Views`.
 Application lifetime and tray behavior are managed in
 `src\PersonalDesktopHelper\App.xaml.cs`.
+
+## GitHub Copilot chat
+
+The integration follows the device-authorization, token-exchange and HTTP chat
+approach in CopilotEverywhere. A GitHub account with Copilot access and a network
+connection are required. No Copilot CLI installation is required.
+
+1. Open **Options > Copilot**, then select **Sign in**.
+2. Select **Open sign-in page** and enter the displayed code on GitHub.
+3. After authorization, available chat models are loaded. Select a model and
+   **Save settings**, or leave the field blank for automatic selection
+   (`gpt-4o` if available, otherwise the first available chat model).
+4. Type into the main window and select **Send**, or press Enter.
+   Shift+Enter inserts a new line.
+
+**Connect** reuses a saved sign-in and loads available models. **Disconnect** drops
+the active connection without deleting the credential. **Sign out** removes the
+saved credential and clears the conversation. **Stop** cancels an in-progress
+request or sign-in. **New chat** clears the current conversation context. Changed
+model settings start a new chat; saving unchanged settings preserves it.
+
+The main window displays a selectable plain-text transcript. Messages are sent
+with conversation history, and replies appear when the response completes.
+Closing and reopening the window preserves the chat and draft in memory; **Quit**
+cancels any pending request and discards that in-memory conversation. The chat
+does not execute tools, run local commands, read files or modify files.
+
+The model preference is part of `state.json`. The OAuth credential is stored
+separately in `copilot-auth.dat` beside the executable, encrypted using Windows
+DPAPI for the current user. It cannot be reused by copying it to another Windows
+account or machine. Short-lived Copilot tokens are kept only in memory, refreshed
+before expiry, and refreshed once after an unauthorized API response. Tokens,
+prompts and replies are not written to application logs.
+
+Messages are sent to GitHub Copilot, subject to your account and organization
+policies. This uses the same Copilot integration HTTP endpoints as the reference
+app; changes to those endpoints can require an integration update. Authentication,
+subscription, model, network and rate-limit errors are shown in the chat/options
+status rather than silently ignored.
 
 ## Notifications
 

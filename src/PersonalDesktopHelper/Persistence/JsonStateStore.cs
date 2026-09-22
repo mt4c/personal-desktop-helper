@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using PersonalDesktopHelper.Scheduling;
+using PersonalDesktopHelper.Copilot;
 
 namespace PersonalDesktopHelper.Persistence;
 
@@ -76,26 +77,20 @@ public sealed class JsonStateStore
         }
     }
 
+    public void SetCopilotSettings(CopilotSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        lock (_gate)
+        {
+            Save(_state with { Copilot = settings });
+        }
+    }
+
     private void Save(ApplicationState state)
     {
         state.Validate();
         var bytes = JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions);
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        var temporaryPath = $"{FilePath}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                stream.Write(bytes);
-                stream.Flush(flushToDisk: true);
-            }
-
-            File.Move(temporaryPath, FilePath, overwrite: true);
-            _state = state;
-        }
-        finally
-        {
-            File.Delete(temporaryPath);
-        }
+        AtomicFile.WriteAllBytes(FilePath, bytes);
+        _state = state;
     }
 }

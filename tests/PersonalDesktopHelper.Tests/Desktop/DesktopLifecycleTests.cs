@@ -35,6 +35,8 @@ public sealed class DesktopLifecycleTests
                             menu.Items.Cast<Forms.ToolStripItem>().Select(item => item.Text));
                         Assert.True(tray.Visible);
                         Assert.True(app.MainWindow.IsVisible);
+                        Assert.Same(app.Chat, app.MainWindow.DataContext);
+                        app.Chat.Prompt = "Draft retained while the main window is closed";
                         var toggle = Assert.IsType<Forms.ToolStripMenuItem>(menu.Items[1]);
                         Assert.True(toggle.Checked);
                         toggle.PerformClick();
@@ -45,6 +47,13 @@ public sealed class DesktopLifecycleTests
                         menu.Items[0].PerformClick();
                         menu.Items[0].PerformClick();
                         var options = Assert.Single(app.Windows.OfType<OptionsWindow>());
+                        options.SelectCopilotTab();
+                        var model = Assert.IsType<System.Windows.Controls.ComboBox>(options.FindName("CopilotModelComboBox"));
+                        model.Text = "test-model";
+                        var saveCopilot = Assert.IsType<System.Windows.Controls.Button>(options.FindName("SaveCopilotSettingsButton"));
+                        saveCopilot.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                        Assert.Equal("test-model", app.Chat.Settings.Model);
+                        Assert.Equal("test-model", new Persistence.JsonStateStore(Path.Combine(stateDirectory, "state.json")).State.Copilot.Model);
                         var checkbox = Assert.IsType<System.Windows.Controls.CheckBox>(options.FindName("NotificationsCheckBox"));
                         checkbox.IsChecked = false;
                         checkbox.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
@@ -66,6 +75,8 @@ public sealed class DesktopLifecycleTests
                             .GetMethod("OnMouseClick", BindingFlags.Instance | BindingFlags.NonPublic)!
                             .Invoke(tray, [new Forms.MouseEventArgs(Forms.MouseButtons.Left, 1, 0, 0, 0)]);
                         Assert.True(app.MainWindow.IsVisible);
+                        Assert.Same(app.Chat, app.MainWindow.DataContext);
+                        Assert.Equal("Draft retained while the main window is closed", app.Chat.Prompt);
                         pending = app.Scheduler.AddTask(
                             "Shutdown probe",
                             new IntervalSchedule(TimeSpan.FromHours(1)),
