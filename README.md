@@ -23,7 +23,11 @@ Closing all windows leaves the application running in the tray.
 
 - Left-click the tray icon to open or activate the main window.
 - Right-click the tray icon and select **Options** to open or activate the
-  options window. Options are not configured yet.
+  options window. Its **Notifications** tab controls notification delivery.
+  Its **Scheduler** tab lists tasks, schedules, status and next-run times, with
+  controls to enable, disable or delete the selected task.
+- Toggle **Notifications** in the tray menu to enable or disable notifications.
+  This stays synchronized with the checkbox in Options.
 - Select **Quit** from the tray menu to exit the application.
 
 Each window has at most one open instance. Minimized windows are restored when
@@ -31,3 +35,92 @@ opened from the tray. Windows may place the tray icon in its hidden-icons area.
 
 Window layouts are defined in `MainWindow.xaml` and `OptionsWindow.xaml`.
 Application lifetime and tray behavior are managed in `App.xaml.cs`.
+
+## Notifications
+
+Modules use `INotificationService.NotifyAsync(title, message, cancellationToken)`.
+`NotificationService` applies the enable/disable setting and delegates delivery to
+`INotificationSender`. The current sender uses Windows tray balloon notifications;
+another sender can be substituted without changing callers or scheduled tasks.
+Windows notification settings and Do Not Disturb may suppress their display.
+Disabling notifications drops new messages rather than queuing them for later.
+
+The demo task sends the current local date and time at each minute boundary.
+It continues to run when all windows are closed. It is created on first launch
+only; disabling or deleting it is preserved across restarts.
+
+## Saved state
+
+Options and scheduled task definitions are saved automatically to:
+
+```text
+%LOCALAPPDATA%\PersonalDesktopHelper\state.json
+```
+
+The file contains the notification setting, task IDs, handler IDs, schedule types,
+enabled/completed flags and next-run times. Changes use a temporary file followed
+by atomic replacement. Invalid files are reported rather than silently reset.
+Failed saves are surfaced without applying the requested setting or task change.
+
+On startup, missed occurrences are skipped, recurring tasks advance to their next
+future occurrence, and expired one-shot tasks remain completed. A notification
+summarizes skipped tasks when notifications are enabled. Disabled recurring tasks
+do not execute or produce missed-run notifications. Enabling a disabled task
+resumes at its next future occurrence.
+
+## Scheduling
+
+Modules register asynchronous callbacks with stable handler IDs using
+`Scheduler.RegisterHandler` on every boot, before saved tasks are restored.
+Task definitions reference these IDs, since executable delegates cannot be stored
+in JSON. A saved task whose module is unavailable remains visible as
+**Handler unavailable** until that handler is registered.
+
+The running application exposes `App.Scheduler` and `App.Notifications`; these
+services can also be passed to modules directly. Create definitions only when
+requested, not on every boot, so saved or deleted tasks are not duplicated:
+
+```csharp
+app.Scheduler.RegisterHandler("reminder",
+    token => app.Notifications.NotifyAsync("Reminder", "Scheduled reminder.", token));
+app.Scheduler.RegisterHandler("periodic-work", token => DoWorkAsync(token));
+
+var reminderId = app.Scheduler.AddTask("Reminder", "reminder",
+    new OneShotSchedule(DateTimeOffset.Now.Date.AddDays(1).AddHours(9)));
+app.Scheduler.AddTask("Periodic work", "periodic-work",
+    new IntervalSchedule(TimeSpan.FromMinutes(5)));
+app.Scheduler.AddTask("Weekday reminder", "reminder",
+    new CronSchedule("0 9 * * 1-5"));
+
+app.Scheduler.SetEnabled(reminderId, false);
+// app.Scheduler.DeleteTask(reminderId);
+```
+
+- One-shot timestamps must be in the future and aligned to a whole minute.
+- Intervals must be positive whole minutes. Their first run is the registration
+  minute plus the interval; later runs retain that cadence.
+- Cron expressions have five fields: minute, hour, day of month, month, day of
+  week. Cron uses the local time zone by default, or an explicit `TimeZoneInfo`.
+  Parsing and daylight-saving transitions use Cronos. When both day-of-month and
+  day-of-week are specified, both must match (Cronos AND semantics).
+- Tasks run independently off the UI thread. A task never overlaps itself.
+  Missed occurrences during sleep or long-running callbacks are not replayed:
+  an overdue task runs once, then advances to its next future occurrence.
+- Task failures are passed to the scheduler's required failure callback. The app
+  reports them through `Trace.TraceError`; recurring tasks continue after callback
+  failures. Persistence failures pause the task and appear in its status.
+- Disabling or deleting a task prevents future runs but lets a current run finish.
+  Completed one-shot tasks cannot be enabled again; they can be deleted.
+- `AddTask` returns a stable task ID. `GetTasks` returns display snapshots, and
+  `GetCompletion(id)` returns the registration's lifetime task. **Quit** cancels
+  pending waits and running callbacks, and awaits their completion before removing
+  the tray icon. Callbacks must honor their cancellation token.
+- Tasks must have the app running to execute. Occurrences are saved as consumed
+  before invoking callbacks to prevent completed one-shots from replaying after
+  a restart; this does not guarantee execution if the process crashes mid-run.
+
+Run automated tests with:
+
+```powershell
+dotnet test .\tests\PersonalDesktopHelper.Tests\PersonalDesktopHelper.Tests.csproj
+```
