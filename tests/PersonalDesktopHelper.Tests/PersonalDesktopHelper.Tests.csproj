@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\PersonalDesktopHelper.csproj" />
+    <ProjectReference Include="..\..\src\PersonalDesktopHelper\PersonalDesktopHelper.csproj" />
   </ItemGroup>
 
 </Project>

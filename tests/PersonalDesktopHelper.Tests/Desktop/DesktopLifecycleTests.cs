@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
 using PersonalDesktopHelper.Scheduling;
+using PersonalDesktopHelper.Views;
 using Forms = System.Windows.Forms;
 
 namespace PersonalDesktopHelper.Tests;

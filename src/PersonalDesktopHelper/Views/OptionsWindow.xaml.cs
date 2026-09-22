@@ -6,7 +6,7 @@ using System.Windows.Controls;
 using PersonalDesktopHelper.Notifications;
 using PersonalDesktopHelper.Scheduling;
 
-namespace PersonalDesktopHelper;
+namespace PersonalDesktopHelper.Views;
 
 public partial class OptionsWindow : Window
 {

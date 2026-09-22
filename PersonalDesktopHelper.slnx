@@ -1,6 +1,8 @@
 <Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PersonalDesktopHelper/PersonalDesktopHelper.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/PersonalDesktopHelper.Tests/PersonalDesktopHelper.Tests.csproj" />
   </Folder>
-  <Project Path="PersonalDesktopHelper.csproj" />
 </Solution>

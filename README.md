@@ -13,7 +13,31 @@ From the repository root:
 
 ```powershell
 dotnet build PersonalDesktopHelper.slnx
-dotnet run --project PersonalDesktopHelper.csproj
+dotnet run --project .\src\PersonalDesktopHelper\PersonalDesktopHelper.csproj
+```
+
+## Project structure
+
+```text
+PersonalDesktopHelper.slnx
+src\
+  PersonalDesktopHelper\
+    App.xaml / App.xaml.cs       Application startup, tray and lifetime
+    Assets\                      Application icon
+    Views\                       Main and options windows
+    Notifications\               Notification service and Windows delivery
+    Scheduling\                  Schedules, task management and demo task
+    Persistence\                 JSON state model and atomic file storage
+    Logging\                     Daily file logger and retention cleanup
+    Properties\                  Assembly metadata
+tests\
+  PersonalDesktopHelper.Tests\
+    Desktop\                     Window and tray integration coverage
+    Logging\                     Log output and retention coverage
+    Notifications\               Notification behavior
+    Persistence\                 State loading and saving
+    Scheduling\                  Schedule timing and task management
+    TestSupport\                 Shared deterministic clock and test helpers
 ```
 
 ## Desktop behavior
@@ -33,8 +57,9 @@ Closing all windows leaves the application running in the tray.
 Each window has at most one open instance. Minimized windows are restored when
 opened from the tray. Windows may place the tray icon in its hidden-icons area.
 
-Window layouts are defined in `MainWindow.xaml` and `OptionsWindow.xaml`.
-Application lifetime and tray behavior are managed in `App.xaml.cs`.
+Window layouts are defined in `src\PersonalDesktopHelper\Views`.
+Application lifetime and tray behavior are managed in
+`src\PersonalDesktopHelper\App.xaml.cs`.
 
 ## Notifications
 

@@ -1,4 +1,4 @@
-<Window x:Class="PersonalDesktopHelper.OptionsWindow"
+<Window x:Class="PersonalDesktopHelper.Views.OptionsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Options" Height="470" Width="850" MinHeight="350" MinWidth="650"

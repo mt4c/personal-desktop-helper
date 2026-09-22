@@ -6,6 +6,7 @@ using PersonalDesktopHelper.Logging;
 using PersonalDesktopHelper.Notifications;
 using PersonalDesktopHelper.Persistence;
 using PersonalDesktopHelper.Scheduling;
+using PersonalDesktopHelper.Views;
 using Forms = System.Windows.Forms;
 
 namespace PersonalDesktopHelper;
