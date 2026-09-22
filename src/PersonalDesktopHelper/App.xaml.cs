@@ -27,9 +27,7 @@ public partial class App : System.Windows.Application
     private readonly CancellationTokenSource _cleanupCancellation = new();
     private Task? _logCleanup;
 
-    public App() : this(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PersonalDesktopHelper", "state.json"))
+    public App() : this(Path.Combine(AppContext.BaseDirectory, "state.json"))
     {
     }
 

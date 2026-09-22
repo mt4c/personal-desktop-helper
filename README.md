@@ -76,11 +76,16 @@ only; disabling or deleting it is preserved across restarts.
 
 ## Saved state
 
-Options and scheduled task definitions are saved automatically to:
+Options and scheduled task definitions are saved automatically beside the executable:
 
 ```text
-%LOCALAPPDATA%\PersonalDesktopHelper\state.json
+<executable directory>\state.json
 ```
+
+Storage is based on `AppContext.BaseDirectory`, not the working directory. The
+executable directory must be writable. During development, this is the app's
+build output directory. To move an existing profile, copy its `state.json` and
+optional `logs` folder beside the executable while the application is closed.
 
 The file contains the notification setting, task IDs, handler IDs, schedule types,
 enabled/completed flags and next-run times. Changes use a temporary file followed
@@ -149,7 +154,7 @@ app.Scheduler.SetEnabled(reminderId, false);
 The application writes timestamped UTC logs to:
 
 ```text
-%LOCALAPPDATA%\PersonalDesktopHelper\logs\desktop-helper-yyyyMMdd-processId.log
+<executable directory>\logs\desktop-helper-yyyyMMdd-processId.log
 ```
 
 Files roll over daily (UTC) and are flushed after each entry. Startup, shutdown,
