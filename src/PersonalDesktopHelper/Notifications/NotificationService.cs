@@ -35,14 +35,18 @@ public sealed class NotificationService(
         }
     }
 
-    public Task NotifyAsync(string title, string message, CancellationToken cancellationToken = default)
+    public async Task<bool> NotifyAsync(string title, string message, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
         cancellationToken.ThrowIfCancellationRequested();
 
-        return IsEnabled
-            ? _sender.SendAsync(title, message, cancellationToken)
-            : Task.CompletedTask;
+        if (!IsEnabled)
+        {
+            return false;
+        }
+
+        await _sender.SendAsync(title, message, cancellationToken).ConfigureAwait(false);
+        return true;
     }
 }

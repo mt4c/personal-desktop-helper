@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Frozen;
 
 namespace PersonalDesktopHelper.Scheduling;
 
@@ -9,7 +10,7 @@ public sealed class Scheduler : IAsyncDisposable
     private readonly Action<string, Exception> _reportFailure;
     private readonly Action<IReadOnlyList<ScheduledTaskState>>? _persistTasks;
     private readonly CancellationTokenSource _shutdown = new();
-    private readonly Dictionary<string, Func<CancellationToken, Task>> _handlers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Func<IReadOnlyDictionary<string, string>, CancellationToken, Task>> _handlers = new(StringComparer.Ordinal);
     private readonly Dictionary<Guid, Registration> _tasks = [];
     private readonly List<Registration> _runners = [];
     private bool _stopping;
@@ -30,6 +31,12 @@ public sealed class Scheduler : IAsyncDisposable
 
     public void RegisterHandler(string handlerId, Func<CancellationToken, Task> action)
     {
+        ArgumentNullException.ThrowIfNull(action);
+        RegisterHandler(handlerId, (_, token) => action(token));
+    }
+
+    public void RegisterHandler(string handlerId, Func<IReadOnlyDictionary<string, string>, CancellationToken, Task> action)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
         ArgumentNullException.ThrowIfNull(action);
         lock (_gate)
@@ -45,7 +52,15 @@ public sealed class Scheduler : IAsyncDisposable
         OnTasksChanged();
     }
 
-    public Guid AddTask(string name, string handlerId, TaskSchedule schedule)
+    public IReadOnlyList<string> GetHandlerIds()
+    {
+        lock (_gate)
+        {
+            return _handlers.Keys.Order(StringComparer.Ordinal).ToArray();
+        }
+    }
+
+    public Guid AddTask(string name, string handlerId, TaskSchedule schedule, IReadOnlyDictionary<string, string>? parameters = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
@@ -64,7 +79,8 @@ public sealed class Scheduler : IAsyncDisposable
             var state = new ScheduledTaskState
             {
                 Id = Guid.NewGuid(), Name = name, HandlerId = handlerId, Schedule = schedule,
-                IsEnabled = true, IsCompleted = false, NextRunAt = next
+                IsEnabled = true, IsCompleted = false, NextRunAt = next,
+                Parameters = parameters?.ToFrozenDictionary(StringComparer.Ordinal) ?? FrozenDictionary<string, string>.Empty
             };
             state.Validate();
             _persistTasks?.Invoke([.. _tasks.Values.Select(task => task.State), state]);
@@ -188,7 +204,7 @@ public sealed class Scheduler : IAsyncDisposable
 
     private void AddRegistration(ScheduledTaskState state)
     {
-        var task = new Registration(state);
+        var task = new Registration(state with { Parameters = state.Parameters.ToFrozenDictionary(StringComparer.Ordinal) });
         _tasks.Add(state.Id, task);
         _runners.Add(task);
         task.Completion = Task.Run(() => RunTaskAsync(task, _shutdown.Token));
@@ -216,7 +232,7 @@ public sealed class Scheduler : IAsyncDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    Func<CancellationToken, Task>? action;
+                    Func<IReadOnlyDictionary<string, string>, CancellationToken, Task>? action;
                     DateTimeOffset? next;
                     lock (_gate)
                     {
@@ -260,7 +276,7 @@ public sealed class Scheduler : IAsyncDisposable
                     Trace.TraceInformation("Scheduled task starting: '{0}' ({1}).", task.State.Name, task.State.Id);
                     try
                     {
-                        await action!(cancellationToken).ConfigureAwait(false);
+                        await action!(task.State.Parameters, cancellationToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {

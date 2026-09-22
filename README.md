@@ -26,6 +26,7 @@ src\
     Assets\                      Application icon
     Views\                       Main and options windows
     Copilot\                     GitHub sign-in, protected credentials and chat
+    Mcp\                         In-process MCP server, client and module tools
     Notifications\               Notification service and Windows delivery
     Scheduling\                  Schedules, task management and demo task
     Persistence\                 JSON state model and atomic file storage
@@ -35,6 +36,7 @@ tests\
   PersonalDesktopHelper.Tests\
     Desktop\                     Window and tray integration coverage
     Copilot\                     Authentication, chat and credential storage
+    Mcp\                         Module protocol and action coverage
     Logging\                     Log output and retention coverage
     Notifications\               Notification behavior
     Persistence\                 State loading and saving
@@ -53,6 +55,8 @@ Closing all windows leaves the application running in the tray.
   Its **Scheduler** tab lists tasks, schedules, status and next-run times, with
   controls to enable, disable or delete the selected task. Its **Copilot** tab
   manages GitHub sign-in, chat model selection and connection status.
+  Its **System prompt** tab shows the constant instructions, editable instructions
+  and combined prompt sent to Copilot.
 - Toggle **Notifications** in the tray menu to enable or disable notifications.
   This stays synchronized with the checkbox in Options.
 - Select **Quit** from the tray menu to exit the application.
@@ -82,13 +86,15 @@ connection are required. No Copilot CLI installation is required.
 the active connection without deleting the credential. **Sign out** removes the
 saved credential and clears the conversation. **Stop** cancels an in-progress
 request or sign-in. **New chat** clears the current conversation context. Changed
-model settings start a new chat; saving unchanged settings preserves it.
+model or system-prompt settings start a new chat; saving unchanged settings
+preserves it.
 
 The main window displays a selectable plain-text transcript. Messages are sent
 with conversation history, and replies appear when the response completes.
 Closing and reopening the window preserves the chat and draft in memory; **Quit**
-cancels any pending request and discards that in-memory conversation. The chat
-does not execute tools, run local commands, read files or modify files.
+cancels any pending request and discards that in-memory conversation. Copilot
+can call the notification and scheduler tools described below. It has no shell,
+arbitrary file-access, credential-access or program-execution tools.
 
 The model preference is part of `state.json`. The OAuth credential is stored
 separately in `copilot-auth.dat` beside the executable, encrypted using Windows
@@ -97,11 +103,46 @@ account or machine. Short-lived Copilot tokens are kept only in memory, refreshe
 before expiry, and refreshed once after an unauthorized API response. Tokens,
 prompts and replies are not written to application logs.
 
-Messages are sent to GitHub Copilot, subject to your account and organization
+Messages, system instructions, tool schemas and tool results (including requested
+task details and notification text) are sent to GitHub Copilot, subject to your account and organization
 policies. This uses the same Copilot integration HTTP endpoints as the reference
 app; changes to those endpoints can require an integration update. Authentication,
 subscription, model, network and rate-limit errors are shown in the chat/options
 status rather than silently ignored.
+
+### Module tools and system prompt
+
+An embedded MCP server exposes notification and scheduler actions through the
+official MCP .NET library. Copilot's structured function calls are routed through
+an MCP client to that server, and tool results are returned to the model for its
+reply. The connection uses in-process streams: no TCP port, external MCP process
+or publicly accessible endpoint is opened.
+
+| Tools | Actions |
+| --- | --- |
+| `notifications_get_status`, `notifications_set_enabled`, `notifications_send` | Inspect/toggle notifications or send one now |
+| `scheduler_list_tasks`, `scheduler_list_handlers` | Inspect schedules, registered handlers, current time and timezone |
+| `scheduler_create_task` | Create a one-shot, interval or cron task |
+| `scheduler_set_enabled`, `scheduler_delete_task` | Enable, disable or delete a task by ID |
+
+Actions run **without per-action confirmation**. For example, ask "Remind me to
+take a break every 30 minutes" or "Disable the current-time notification task."
+Only registered handlers can be scheduled. Choose a Copilot model that supports
+function/tool calling; chat-only models may reject tool-enabled requests.
+Each message allows up to eight tool rounds, with at most eight calls per round.
+Repeated tool-call IDs within a turn are not executed twice.
+
+**Stop** cancels the current request, but does not undo completed actions.
+Tool outcomes remain in the conversation if a follow-up request fails or is
+cancelled. If an outcome is uncertain, inspect task/notification state before
+repeating the action.
+
+In **Options > System prompt**, the constant part is read-only and generated
+from application instructions and registered tool descriptions/schemas. Edit the
+additional instructions to customize Copilot's behavior; the combined preview
+updates as you type. Select **Save system prompt** to persist the editable part in `state.json`
+and use it for subsequent chats. The generated constant part is not stored in
+the state file.
 
 ## Notifications
 
@@ -109,6 +150,8 @@ Modules use `INotificationService.NotifyAsync(title, message, cancellationToken)
 `NotificationService` applies the enable/disable setting and delegates delivery to
 `INotificationSender`. The current sender uses Windows tray balloon notifications;
 another sender can be substituted without changing callers or scheduled tasks.
+`NotifyAsync` returns `true` when submitted to the sender and `false` when
+suppressed by the application's notification setting.
 Windows notification settings and Do Not Disturb may suppress their display.
 Disabling notifications drops new messages rather than queuing them for later.
 
@@ -129,7 +172,8 @@ executable directory must be writable. During development, this is the app's
 build output directory. To move an existing profile, copy its `state.json` and
 optional `logs` folder beside the executable while the application is closed.
 
-The file contains the notification setting, task IDs, handler IDs, schedule types,
+The file contains notification and Copilot settings (including editable system
+instructions), task IDs, handler IDs, string parameters, schedule types,
 enabled/completed flags and next-run times. Changes use a temporary file followed
 by atomic replacement. Invalid files are reported rather than silently reset.
 Failed saves are surfaced without applying the requested setting or task change.
@@ -147,6 +191,11 @@ Modules register asynchronous callbacks with stable handler IDs using
 Task definitions reference these IDs, since executable delegates cannot be stored
 in JSON. A saved task whose module is unavailable remains visible as
 **Handler unavailable** until that handler is registered.
+
+Handlers may accept a string-parameter dictionary as well as the cancellation
+token. Supply that dictionary to `AddTask` to persist it with the task. The
+built-in `notification` handler requires exactly `title` and `message`, both
+nonempty strings. The `current-time-notification` handler needs no parameters.
 
 The running application exposes `App.Scheduler` and `App.Notifications`; these
 services can also be passed to modules directly. Create definitions only when

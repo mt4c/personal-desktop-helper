@@ -13,9 +13,9 @@ public sealed class NotificationTests
         var service = new NotificationService(sender);
 
         Assert.True(service.IsEnabled);
-        await service.NotifyAsync("Title", "First");
+        Assert.True(await service.NotifyAsync("Title", "First"));
         service.IsEnabled = false;
-        await service.NotifyAsync("Title", "Suppressed");
+        Assert.False(await service.NotifyAsync("Title", "Suppressed"));
         service.IsEnabled = true;
         await service.NotifyAsync("Title", "Last");
 

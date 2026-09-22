@@ -8,6 +8,7 @@ using PersonalDesktopHelper.Persistence;
 using PersonalDesktopHelper.Scheduling;
 using PersonalDesktopHelper.Views;
 using PersonalDesktopHelper.Copilot;
+using PersonalDesktopHelper.Mcp;
 using Forms = System.Windows.Forms;
 
 namespace PersonalDesktopHelper;
@@ -28,6 +29,7 @@ public partial class App : System.Windows.Application
     private readonly CancellationTokenSource _cleanupCancellation = new();
     private Task? _logCleanup;
     private ChatViewModel? _chat;
+    private LocalMcpConnection? _mcp;
 
     public App() : this(Path.Combine(AppContext.BaseDirectory, "state.json"))
     {
@@ -121,22 +123,6 @@ public partial class App : System.Windows.Application
     {
         var store = new JsonStateStore(_statePath);
         var credentialPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_statePath))!, "copilot-auth.dat");
-        _chat = new ChatViewModel(
-            new CopilotHttpConnection(new ProtectedCopilotCredentialStore(credentialPath)),
-            store.State.Copilot, store.SetCopilotSettings, action =>
-            {
-                if (!Dispatcher.HasShutdownStarted)
-                {
-                    if (Dispatcher.CheckAccess())
-                    {
-                        action();
-                    }
-                    else
-                    {
-                        Dispatcher.BeginInvoke(action);
-                    }
-                }
-            });
         Trace.TraceInformation("Loaded application state. New profile: {0}; saved tasks: {1}.", store.IsNew, store.State.Tasks.Count);
         _trayMenu = new Forms.ContextMenuStrip();
         _trayMenu.Items.Add("Options", null, (_, _) => ShowOptionsWindow());
@@ -176,6 +162,7 @@ public partial class App : System.Windows.Application
             persistTasks: store.SetTasks);
         var currentTimeTask = new CurrentTimeNotificationTask(Notifications);
         Scheduler.RegisterHandler("current-time-notification", currentTimeTask.RunAsync);
+        Scheduler.RegisterHandler(NotificationScheduledTask.HandlerId, new NotificationScheduledTask(Notifications).RunAsync);
         var skipped = Scheduler.RestoreTasks(store.State.Tasks);
         foreach (var task in skipped)
         {
@@ -187,6 +174,24 @@ public partial class App : System.Windows.Application
                 "Current time notification", "current-time-notification",
                 new IntervalSchedule(TimeSpan.FromMinutes(1)));
         }
+
+        _mcp = new LocalMcpConnection(new DesktopModuleTools(Notifications, Scheduler));
+        _chat = new ChatViewModel(
+            new CopilotHttpConnection(new ProtectedCopilotCredentialStore(credentialPath), moduleTools: _mcp),
+            store.State.Copilot, store.SetCopilotSettings, action =>
+            {
+                if (!Dispatcher.HasShutdownStarted)
+                {
+                    if (Dispatcher.CheckAccess())
+                    {
+                        action();
+                    }
+                    else
+                    {
+                        Dispatcher.BeginInvoke(action);
+                    }
+                }
+            }, SystemPromptDefinition.BuildConstant(_mcp.Tools));
 
         _trayIcon.Visible = true;
         return skipped;
@@ -238,14 +243,19 @@ public partial class App : System.Windows.Application
 
         try
         {
-            if (_scheduler is not null)
-            {
-                await _scheduler.DisposeAsync();
-            }
-
             if (_chat is not null)
             {
                 await _chat.DisposeAsync();
+            }
+
+            if (_mcp is not null)
+            {
+                await _mcp.DisposeAsync();
+            }
+
+            if (_scheduler is not null)
+            {
+                await _scheduler.DisposeAsync();
             }
 
             _cleanupCancellation.Cancel();

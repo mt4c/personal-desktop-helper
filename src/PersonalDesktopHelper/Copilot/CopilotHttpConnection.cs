@@ -5,6 +5,9 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ModelContextProtocol;
+using ModelContextProtocol.Protocol;
+using PersonalDesktopHelper.Mcp;
 
 namespace PersonalDesktopHelper.Copilot;
 
@@ -18,8 +21,12 @@ public sealed class CopilotHttpConnection : ICopilotConnection
     private CopilotAccessToken? _access;
     private string? _model;
     private bool _disposed;
+    private readonly IModuleToolClient? _moduleTools;
+    private string _systemPrompt;
+    private const int MaxToolRounds = 8;
+    private const int MaxCallsPerRound = 8;
 
-    public CopilotHttpConnection(ICopilotCredentialStore credentials, HttpClient? http = null)
+    public CopilotHttpConnection(ICopilotCredentialStore credentials, HttpClient? http = null, IModuleToolClient? moduleTools = null)
     {
         _credentials = credentials;
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
@@ -27,6 +34,8 @@ public sealed class CopilotHttpConnection : ICopilotConnection
             Timeout = TimeSpan.FromMinutes(2)
         };
         _auth = new GitHubDeviceAuthClient(_http);
+        _moduleTools = moduleTools;
+        _systemPrompt = SystemPromptDefinition.BuildConstant(moduleTools?.Tools ?? []);
     }
 
     public bool IsConnected { get; private set; }
@@ -78,6 +87,8 @@ public sealed class CopilotHttpConnection : ICopilotConnection
         }
 
         IsConnected = true;
+        _systemPrompt = SystemPromptDefinition.Compose(
+            SystemPromptDefinition.BuildConstant(_moduleTools?.Tools ?? []), settings.AdditionalSystemPrompt);
         return $"Connected to GitHub Copilot using {_model}.";
     }
 
@@ -90,32 +101,160 @@ public sealed class CopilotHttpConnection : ICopilotConnection
                 throw new CopilotException("Connect to Copilot before sending a message.");
             }
 
-            var userMessage = new ApiMessage("user", prompt);
-            var messages = new List<ApiMessage>
+            return await RunTurnAsync(prompt, responseChanged, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken);
+
+    private async Task<string> RunTurnAsync(string prompt, Action<string> responseChanged, CancellationToken token)
+    {
+        var turn = new List<ApiMessage> { new("user", prompt) };
+        var hasToolCalls = false;
+        var committed = false;
+        var cachedCalls = new Dictionary<string, (FunctionCall Call, string Result)>(StringComparer.Ordinal);
+        var tools = _moduleTools?.Tools ?? [];
+        try
+        {
+            for (var round = 0; round <= MaxToolRounds; round++)
             {
-                new("system", "You are a helpful assistant. This is a chat-only interface with no tools.")
-            };
-            messages.AddRange(_history);
-            messages.Add(userMessage);
-            using var response = await SendAuthorizedAsync(() =>
-            {
-                var request = ApiRequest(HttpMethod.Post, "https://api.githubcopilot.com/chat/completions");
-                request.Content = JsonContent.Create(new { model = _model, messages, stream = false });
-                return request;
-            }, cancellationToken).ConfigureAwait(false);
-            var result = await response.Content.ReadFromJsonAsync<Completion>(cancellationToken).ConfigureAwait(false);
-            var content = result?.Choices?.FirstOrDefault()?.Message?.Content;
-            if (string.IsNullOrWhiteSpace(content))
-            {
-                throw new CopilotException("Copilot returned no text. Try another message or model.");
+                token.ThrowIfCancellationRequested();
+                var messages = new List<ApiMessage> { new("system", _systemPrompt) };
+                messages.AddRange(_history);
+                messages.AddRange(turn);
+                using var response = await SendAuthorizedAsync(() =>
+                {
+                    var request = ApiRequest(HttpMethod.Post, "https://api.githubcopilot.com/chat/completions");
+                    request.Content = JsonContent.Create(tools.Count == 0
+                        ? (object)new { model = _model, messages, stream = false }
+                        : new
+                        {
+                            model = _model, messages, stream = false,
+                            tools = tools.Select(tool => new
+                            {
+                                type = "function",
+                                function = new { name = tool.Name, description = tool.Description, parameters = tool.InputSchema }
+                            }).ToArray(),
+                            tool_choice = round == MaxToolRounds ? "none" : "auto",
+                            parallel_tool_calls = false
+                        });
+                    return request;
+                }, token).ConfigureAwait(false);
+                var completion = await response.Content.ReadFromJsonAsync<Completion>(token).ConfigureAwait(false);
+                var message = completion?.Choices?.FirstOrDefault()?.Message
+                    ?? throw new CopilotException("Copilot returned no assistant message.");
+                token.ThrowIfCancellationRequested();
+                if (message.ToolCalls is not { Count: > 0 } calls)
+                {
+                    if (string.IsNullOrWhiteSpace(message.Content))
+                    {
+                        throw new CopilotException("Copilot returned no text. Try another message or model.");
+                    }
+
+                    turn.Add(new ApiMessage("assistant", message.Content));
+                    _history.AddRange(turn);
+                    committed = true;
+                    responseChanged(message.Content);
+                    return message.Content;
+                }
+
+                if (round == MaxToolRounds || calls.Count > MaxCallsPerRound)
+                {
+                    throw new CopilotException("The per-message tool limit was reached. Completed actions remain applied; inspect their state before continuing.");
+                }
+
+                if (calls.Any(call => call is null || string.IsNullOrWhiteSpace(call.Id) || call.Type != "function" ||
+                    call.Function is null || string.IsNullOrWhiteSpace(call.Function.Name) || call.Function.Arguments is null) ||
+                    calls.Select(call => call.Id).Distinct(StringComparer.Ordinal).Count() != calls.Count)
+                {
+                    throw new CopilotException("Copilot returned malformed or duplicate tool calls. No actions from that response were executed.");
+                }
+
+                hasToolCalls = true;
+                turn.Add(new ApiMessage("assistant", message.Content, calls));
+                var answered = new HashSet<string>(StringComparer.Ordinal);
+                string? activeCall = null;
+                try
+                {
+                    foreach (var call in calls)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        string output;
+                        string? progress = null;
+                        if (cachedCalls.TryGetValue(call.Id, out var cached))
+                        {
+                            output = cached.Call == call.Function ? cached.Result
+                                : SerializeResult(ToolResults.Error("This tool-call ID was already used for a different action. No action was repeated."));
+                        }
+                        else
+                        {
+                            activeCall = call.Id;
+                            var result = await InvokeToolAsync(call.Function, token).ConfigureAwait(false);
+                            output = SerializeResult(result);
+                            cachedCalls.Add(call.Id, (call.Function, output));
+                            progress = $"Tool {call.Function.Name}: {(result.IsError == true ? "failed" : "completed")}.\nWaiting for Copilot's response...";
+                        }
+
+                        turn.Add(new ApiMessage("tool", output, ToolCallId: call.Id));
+                        answered.Add(call.Id);
+                        activeCall = null;
+                        if (progress is not null)
+                        {
+                            responseChanged(progress);
+                        }
+                    }
+                }
+                finally
+                {
+                    foreach (var call in calls.Where(call => !answered.Contains(call.Id)))
+                    {
+                        var reason = call.Id == activeCall
+                            ? "The tool did not return a result. Its action may have completed; inspect current state before retrying."
+                            : "Not executed because this request ended before reaching this tool call.";
+                        turn.Add(new ApiMessage("tool", SerializeResult(ToolResults.Error(reason)), ToolCallId: call.Id));
+                    }
+                }
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            _history.Add(userMessage);
-            _history.Add(new ApiMessage("assistant", content));
-            responseChanged(content);
-            return content;
-        }, cancellationToken);
+            throw new CopilotException("The tool-call limit was reached.");
+        }
+        finally
+        {
+            if (hasToolCalls && !committed)
+            {
+                // Keep tool outcomes even if the HTTP follow-up fails or Stop is clicked: side effects cannot be rolled back.
+                turn.Add(new ApiMessage("assistant",
+                    "This request ended before a final answer. Use the tool results above and inspect current state before repeating any actions."));
+                _history.AddRange(turn);
+            }
+        }
+    }
+
+    private async Task<CallToolResult> InvokeToolAsync(FunctionCall call, CancellationToken token)
+    {
+        if (_moduleTools is null || !_moduleTools.Tools.Any(tool => tool.Name == call.Name))
+        {
+            return ToolResults.Error("The requested tool is not available. Use only advertised module tools.");
+        }
+
+        JsonDocument arguments;
+        try
+        {
+            arguments = JsonDocument.Parse(call.Arguments);
+        }
+        catch (JsonException)
+        {
+            return ToolResults.Error("Tool arguments must be valid JSON.");
+        }
+
+        using (arguments)
+        {
+            return await _moduleTools.CallAsync(call.Name, arguments.RootElement, token).ConfigureAwait(false);
+        }
+    }
+
+    private static string SerializeResult(CallToolResult result) => JsonSerializer.Serialize(new
+    {
+        isError = result.IsError == true,
+        content = result.Content.OfType<TextContentBlock>().Select(content => content.Text).ToArray()
+    });
 
     private async Task<HttpResponseMessage> SendAuthorizedAsync(
         Func<HttpRequestMessage> requestFactory, CancellationToken token)
@@ -217,6 +356,10 @@ public sealed class CopilotHttpConnection : ICopilotConnection
         {
             throw new CopilotException("Saved sign-in cannot be decrypted by this Windows user. Sign out and sign in again.", error);
         }
+        catch (McpException error)
+        {
+            throw new CopilotException("The MCP tool call failed. An action may have completed; inspect the module state before retrying.", error);
+        }
     }
 
     public ValueTask DisposeAsync()
@@ -232,7 +375,16 @@ public sealed class CopilotHttpConnection : ICopilotConnection
 
     private sealed record ApiMessage(
         [property: JsonPropertyName("role")] string Role,
-        [property: JsonPropertyName("content")] string Content);
+        [property: JsonPropertyName("content")] string? Content,
+        [property: JsonPropertyName("tool_calls"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ToolCall>? ToolCalls = null,
+        [property: JsonPropertyName("tool_call_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToolCallId = null);
+    private sealed record ToolCall(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("type")] string Type,
+        [property: JsonPropertyName("function")] FunctionCall Function);
+    private sealed record FunctionCall(
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("arguments")] string Arguments);
     private sealed record ModelList([property: JsonPropertyName("data")] ModelInfo[]? Data);
     private sealed record ModelInfo(
         [property: JsonPropertyName("id")] string? Id,

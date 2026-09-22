@@ -23,18 +23,21 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public ChatViewModel(
         ICopilotConnection connection, CopilotSettings settings,
-        Action<CopilotSettings> persistSettings, Action<Action> dispatch)
+        Action<CopilotSettings> persistSettings, Action<Action> dispatch, string? constantSystemPrompt = null)
     {
         _connection = connection;
         Settings = settings;
         _persistSettings = persistSettings;
         _dispatch = dispatch;
+        ConstantSystemPrompt = constantSystemPrompt ?? SystemPromptDefinition.BuildConstant([]);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event EventHandler? TranscriptChanged;
     public ObservableCollection<ChatMessage> Messages { get; } = [];
     public CopilotSettings Settings { get; private set; }
+    public string ConstantSystemPrompt { get; }
+    public string EffectiveSystemPrompt => SystemPromptDefinition.Compose(ConstantSystemPrompt, Settings.AdditionalSystemPrompt);
     public bool IsConnected => _connection.IsConnected;
     public IReadOnlyList<string> Models => _connection.Models;
     public string UserCode => _authorization?.UserCode ?? "";
@@ -115,6 +118,7 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
         _persistSettings(settings);
         Settings = settings;
         Changed(nameof(Settings));
+        Changed(nameof(EffectiveSystemPrompt));
         await _connection.DisconnectAsync();
         await _connection.NewChatAsync(CancellationToken.None);
         Messages.Clear();

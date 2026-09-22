@@ -1,7 +1,7 @@
 <Window x:Class="PersonalDesktopHelper.Views.OptionsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Options" Height="470" Width="850" MinHeight="350" MinWidth="650"
+        Title="Options" Height="650" Width="950" MinHeight="450" MinWidth="750"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -58,7 +58,7 @@
                                       ItemsSource="{Binding Models}" Margin="0,5,0,12" Padding="6" />
                         </StackPanel>
                         <TextBlock TextWrapping="Wrap"
-                                   Text="Saving changed settings starts a new chat. This chat does not grant Copilot permission to run commands or modify files." />
+                                   Text="Saving changed settings starts a new chat. Copilot can use notification and scheduler MCP tools without confirmation. There are no shell or arbitrary file-access tools." />
                         <WrapPanel Margin="0,12,0,12">
                             <Button Content="Sign in" Padding="12,5" Margin="0,0,8,0"
                                     IsEnabled="{Binding CanConfigure}" Click="OnSignInCopilotClick" />
@@ -84,6 +84,41 @@
                         <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" Foreground="Firebrick" Margin="0,8,0,0" />
                     </StackPanel>
                 </ScrollViewer>
+            </TabItem>
+            <TabItem x:Name="SystemPromptTab" Header="System prompt">
+                <Grid x:Name="SystemPromptPanel" Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Constant instructions and MCP tool definitions (read-only)" Margin="0,0,0,5" />
+                    <TextBox x:Name="ConstantPromptTextBox" Grid.Row="1"
+                             Text="{Binding ConstantSystemPrompt, Mode=OneWay}" IsReadOnly="True"
+                             TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="6" />
+                    <TextBlock Grid.Row="2" Text="Your additional instructions (editable)" Margin="0,10,0,5" />
+                    <TextBox x:Name="EditablePromptTextBox" Grid.Row="3" AcceptsReturn="True" AcceptsTab="True"
+                             TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="6"
+                             IsEnabled="{Binding CanConfigure}" TextChanged="OnSystemPromptTextChanged" />
+                    <TextBlock Grid.Row="4" Text="Combined system prompt preview" Margin="0,10,0,5" />
+                    <TextBox x:Name="CombinedPromptTextBox" Grid.Row="5" IsReadOnly="True"
+                             TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="6" />
+                    <DockPanel Grid.Row="6" Margin="0,10,0,0">
+                        <Button x:Name="SaveSystemPromptButton" DockPanel.Dock="Right" Content="Save system prompt"
+                                Padding="12,5" IsEnabled="{Binding CanConfigure}" Click="OnSaveSystemPromptClick" />
+                        <TextBlock Text="Saving changes starts a new chat. Module actions execute without confirmation."
+                                   Foreground="DimGray" TextWrapping="Wrap" Margin="0,0,12,0" />
+                    </DockPanel>
+                    <StackPanel Grid.Row="7" Margin="0,8,0,0">
+                        <TextBlock Text="{Binding Status}" Foreground="DimGray" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ErrorMessage}" Foreground="Firebrick" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
             </TabItem>
         </TabControl>
         <TextBlock x:Name="StoragePathText" Grid.Row="1" Margin="0,12,0,0"

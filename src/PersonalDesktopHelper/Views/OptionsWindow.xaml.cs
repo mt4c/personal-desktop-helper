@@ -23,8 +23,11 @@ public partial class OptionsWindow : Window
         _chat = chat;
         InitializeComponent();
         CopilotPanel.DataContext = chat;
+        SystemPromptPanel.DataContext = chat;
+        EditablePromptTextBox.Text = chat.Settings.AdditionalSystemPrompt;
+        UpdateSystemPromptPreview();
         CopilotModelComboBox.Text = chat.Settings.Model;
-        StoragePathText.Text = $"Changes are saved automatically to {statePath}";
+        StoragePathText.Text = $"Settings and tasks are stored in {statePath}";
         _notifications.PropertyChanged += OnNotificationChanged;
         _scheduler.TasksChanged += OnTasksChanged;
         Closed += (_, _) =>
@@ -38,10 +41,25 @@ public partial class OptionsWindow : Window
 
     public void SelectCopilotTab() => OptionsTabs.SelectedItem = CopilotTab;
 
-    private CopilotSettings ReadCopilotSettings() => new()
+    private CopilotSettings ReadCopilotSettings() => _chat.Settings with
     {
         Model = CopilotModelComboBox.Text.Trim()
     };
+
+    private void OnSystemPromptTextChanged(object sender, TextChangedEventArgs e) => UpdateSystemPromptPreview();
+
+    private void UpdateSystemPromptPreview()
+    {
+        if (CombinedPromptTextBox is not null && EditablePromptTextBox is not null)
+        {
+            CombinedPromptTextBox.Text = SystemPromptDefinition.Compose(_chat.ConstantSystemPrompt, EditablePromptTextBox.Text);
+        }
+    }
+
+    private async void OnSaveSystemPromptClick(object sender, RoutedEventArgs e)
+    {
+        await _chat.ApplySettingsAsync(_chat.Settings with { AdditionalSystemPrompt = EditablePromptTextBox.Text });
+    }
 
     private async void OnSignInCopilotClick(object sender, RoutedEventArgs e)
     {
