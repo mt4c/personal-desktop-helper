@@ -12,13 +12,16 @@ public sealed class ProtectedCredentialStoreTests
         using var directory = new TemporaryDirectory();
         var path = Path.Combine(directory.Path, "copilot-auth.dat");
         var store = new ProtectedCopilotCredentialStore(path);
+        Assert.False(store.HasCredential);
         Assert.Null(store.Load());
         store.Save("test-only-fake-oauth");
 
+        Assert.True(store.HasCredential);
         Assert.Equal("test-only-fake-oauth", store.Load());
         Assert.DoesNotContain("test-only-fake-oauth", Encoding.UTF8.GetString(File.ReadAllBytes(path)));
         Assert.Empty(Directory.GetFiles(directory.Path, "*.tmp"));
         store.Clear();
+        Assert.False(store.HasCredential);
         Assert.False(File.Exists(path));
         Assert.Null(store.Load());
     }
@@ -31,6 +34,7 @@ public sealed class ProtectedCredentialStoreTests
         File.WriteAllText(path, "invalid encrypted data");
         var store = new ProtectedCopilotCredentialStore(path);
 
+        Assert.True(store.HasCredential);
         Assert.Throws<CryptographicException>(() => store.Load());
         Assert.Equal("invalid encrypted data", File.ReadAllText(path));
     }

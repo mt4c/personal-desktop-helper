@@ -7,6 +7,8 @@ namespace PersonalDesktopHelper.Copilot;
 
 public sealed class ProtectedCopilotCredentialStore(string filePath) : ICopilotCredentialStore
 {
+    public bool HasCredential => File.Exists(filePath);
+
     public string? Load()
     {
         byte[] encrypted;

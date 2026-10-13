@@ -15,6 +15,7 @@ public partial class OptionsWindow : Window
     private readonly Scheduler _scheduler;
     private readonly ChatViewModel _chat;
     private bool _isClosed;
+    private bool _updatingModel = true;
 
     public OptionsWindow(NotificationService notifications, Scheduler scheduler, string statePath, ChatViewModel chat)
     {
@@ -27,14 +28,17 @@ public partial class OptionsWindow : Window
         EditablePromptTextBox.Text = chat.Settings.AdditionalSystemPrompt;
         UpdateSystemPromptPreview();
         CopilotModelComboBox.Text = chat.Settings.Model;
+        _updatingModel = false;
         StoragePathText.Text = $"Settings and tasks are stored in {statePath}";
         _notifications.PropertyChanged += OnNotificationChanged;
         _scheduler.TasksChanged += OnTasksChanged;
+        _chat.PropertyChanged += OnChatChanged;
         Closed += (_, _) =>
         {
             _isClosed = true;
             _notifications.PropertyChanged -= OnNotificationChanged;
             _scheduler.TasksChanged -= OnTasksChanged;
+            _chat.PropertyChanged -= OnChatChanged;
         };
         RefreshControls();
     }
@@ -96,6 +100,49 @@ public partial class OptionsWindow : Window
     private async void OnSaveCopilotClick(object sender, RoutedEventArgs e)
     {
         await _chat.ApplySettingsAsync(ReadCopilotSettings());
+    }
+
+    private async void OnCopilotModelSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingModel || !_chat.CanConfigure || e.AddedItems.Count == 0 ||
+            e.AddedItems[0] is not string model || model == _chat.Settings.Model)
+        {
+            return;
+        }
+
+        var reconnect = _chat.IsConnected;
+        if (!await _chat.ApplySettingsAsync(_chat.Settings with { Model = model }))
+        {
+            UpdateModelText();
+            return;
+        }
+
+        if (reconnect)
+        {
+            await _chat.ConnectAsync();
+        }
+    }
+
+    private void OnChatChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ChatViewModel.Settings))
+        {
+            UpdateModelText();
+        }
+    }
+
+    private void UpdateModelText()
+    {
+        _updatingModel = true;
+        try
+        {
+            CopilotModelComboBox.SelectedItem = _chat.Models.FirstOrDefault(model => model == _chat.Settings.Model);
+            CopilotModelComboBox.Text = _chat.Settings.Model;
+        }
+        finally
+        {
+            _updatingModel = false;
+        }
     }
 
     private async void OnConnectCopilotClick(object sender, RoutedEventArgs e)

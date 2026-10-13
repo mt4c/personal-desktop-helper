@@ -76,18 +76,35 @@ connection are required. No Copilot CLI installation is required.
 
 1. Open **Options > Copilot**, then select **Sign in**.
 2. Select **Open sign-in page** and enter the displayed code on GitHub.
-3. After authorization, available chat models are loaded. Select a model and
-   **Save settings**, or leave the field blank for automatic selection
+3. After authorization, available chat models are loaded. Selecting a listed
+   model automatically saves it as your default and reconnects if connected.
+   For a typed model, select **Save settings**, or clear the field and save for automatic selection
    (`gpt-4o` if available, otherwise the first available chat model).
 4. Type into the main window and select **Send**, or press Enter.
    Shift+Enter inserts a new line.
 
+The connection uses each model's advertised API endpoints: `/chat/completions`
+when supported, or `/responses` for Responses-only models. Both support chat
+history and module tools. Models advertising neither endpoint are excluded from
+the available list.
+
 **Connect** reuses a saved sign-in and loads available models. **Disconnect** drops
-the active connection without deleting the credential. **Sign out** removes the
+the active connection without deleting the credential. On startup, the app
+automatically connects when a saved sign-in is available, using your saved model
+preference. Connection failures are shown in the status/error area and can be
+retried with **Connect**. **Sign out** removes the
 saved credential and clears the conversation. **Stop** cancels an in-progress
 request or sign-in. **New chat** clears the current conversation context. Changed
 model or system-prompt settings start a new chat; saving unchanged settings
 preserves it.
+
+The main window and **Options > Copilot** show separate GitHub sign-in and Copilot
+connection states. Signed in means a saved GitHub credential is available; Connect
+checks that it still grants Copilot access. Sign-in, sign-out, connect and disconnect
+buttons are enabled only when applicable, and are disabled during an operation.
+When disconnected, the main window prompts you to sign in (opening Copilot options)
+or connect using your saved sign-in. Sending is disabled until signed in; with a
+saved sign-in, sending still connects automatically if needed.
 
 The main window displays a selectable plain-text transcript. Messages are sent
 with conversation history, and replies appear when the response completes.
@@ -155,9 +172,9 @@ suppressed by the application's notification setting.
 Windows notification settings and Do Not Disturb may suppress their display.
 Disabling notifications drops new messages rather than queuing them for later.
 
-The demo task sends the current local date and time at each minute boundary.
-It continues to run when all windows are closed. It is created on first launch
-only; disabling or deleting it is preserved across restarts.
+New profiles start with no scheduled tasks. The current-time notification handler
+remains available for explicitly created tasks; no recurring time notification is
+created automatically.
 
 ## Saved state
 

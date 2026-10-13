@@ -58,6 +58,7 @@ public partial class App : System.Windows.Application
             var skipped = InitializeServices();
             ShowMainWindow();
             await SkippedTaskNotification.SendAsync(Notifications, skipped);
+            await Chat.ConnectOnStartupAsync();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -168,13 +169,6 @@ public partial class App : System.Windows.Application
         {
             Trace.TraceWarning("Skipped missed run for task '{0}' ({1}).", task.Name, task.Id);
         }
-        if (store.IsNew)
-        {
-            Scheduler.AddTask(
-                "Current time notification", "current-time-notification",
-                new IntervalSchedule(TimeSpan.FromMinutes(1)));
-        }
-
         _mcp = new LocalMcpConnection(new DesktopModuleTools(Notifications, Scheduler));
         _chat = new ChatViewModel(
             new CopilotHttpConnection(new ProtectedCopilotCredentialStore(credentialPath), moduleTools: _mcp),

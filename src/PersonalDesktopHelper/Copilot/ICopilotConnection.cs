@@ -2,6 +2,7 @@ namespace PersonalDesktopHelper.Copilot;
 
 public interface ICopilotConnection : IAsyncDisposable
 {
+    bool IsSignedIn { get; }
     bool IsConnected { get; }
     IReadOnlyList<string> Models { get; }
     Task<string> SignInAsync(CopilotSettings settings, Action<DeviceAuthorization> authorizationRequested, CancellationToken cancellationToken);

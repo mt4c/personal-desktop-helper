@@ -14,8 +14,10 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
     private Task<bool>? _activeOperation;
     private bool _disposed;
     private bool _isBusy;
+    private bool _isSigningIn;
+    private bool _isConnecting;
     private string _prompt = "";
-    private string _status = "Not connected. Configure Copilot in Options, or send a message to connect.";
+    private string _status = "Open Copilot options to sign in, or connect using your saved sign-in.";
     private string _errorMessage = "";
     private long _sendVersion;
     private long _authorizationVersion;
@@ -38,6 +40,7 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
     public CopilotSettings Settings { get; private set; }
     public string ConstantSystemPrompt { get; }
     public string EffectiveSystemPrompt => SystemPromptDefinition.Compose(ConstantSystemPrompt, Settings.AdditionalSystemPrompt);
+    public bool IsSignedIn => _connection.IsSignedIn;
     public bool IsConnected => _connection.IsConnected;
     public IReadOnlyList<string> Models => _connection.Models;
     public string UserCode => _authorization?.UserCode ?? "";
@@ -45,8 +48,23 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
     public bool HasDeviceCode => _authorization is not null && _isBusy;
     public bool IsBusy => _isBusy;
     public bool CanConfigure => !_isBusy && !_disposed;
+    public bool CanSignIn => CanConfigure && !IsSignedIn;
+    public bool CanSignOut => CanConfigure && IsSignedIn;
+    public bool CanConnect => CanConfigure && IsSignedIn && !IsConnected;
     public bool CanDisconnect => CanConfigure && IsConnected;
-    public bool CanSend => CanConfigure && !string.IsNullOrWhiteSpace(Prompt);
+    public bool CanSend => CanConfigure && IsSignedIn && !string.IsNullOrWhiteSpace(Prompt);
+    public bool CanSetUp => CanSignIn || CanConnect;
+    public string SignInStatus => _isSigningIn ? "Signing in..."
+        : IsSignedIn ? "Signed in (saved GitHub credential)" : "Not signed in";
+    public string ConnectionStatus => IsConnected ? "Connected"
+        : _isSigningIn ? "Waiting for sign-in and connection"
+        : _isConnecting ? "Connecting..." : "Not connected";
+    public string SetupActionText => IsSignedIn ? "Connect" : "Sign in";
+    public string SetupGuidance => _isSigningIn ? "Complete GitHub sign-in in Copilot options."
+        : _isConnecting ? "Connecting to GitHub Copilot..."
+        : !IsSignedIn ? "Sign in to GitHub in Copilot options to connect and start chatting."
+        : !IsConnected ? "Connect to GitHub Copilot to start chatting using your saved sign-in."
+        : "Ready to chat.";
     public string Status => _status;
     public string ErrorMessage => _errorMessage;
 
@@ -61,11 +79,19 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
+    public async Task ConnectOnStartupAsync()
+    {
+        if (CanConnect)
+        {
+            await ConnectAsync();
+        }
+    }
+
     public Task<bool> ConnectAsync() => ExecuteAsync(async token =>
     {
         SetStatus("Connecting to GitHub Copilot...");
         SetStatus(await _connection.ConnectAsync(Settings, token));
-    });
+    }, isConnecting: true);
 
     public Task<bool> SignInAsync() => ExecuteAsync(async token =>
     {
@@ -91,7 +117,7 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
             ++_authorizationVersion;
             _authorization = null;
         }
-    });
+    }, isSigningIn: true, isConnecting: true);
 
     public Task<bool> SignOutAsync() => ExecuteAsync(async _ =>
     {
@@ -144,6 +170,8 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
             {
                 SetStatus("Connecting to GitHub Copilot...");
                 await _connection.ConnectAsync(Settings, token);
+                _isConnecting = false;
+                NotifyState();
             }
 
             Messages.Add(new ChatMessage("You", prompt));
@@ -176,7 +204,7 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
 
                 TranscriptChanged?.Invoke(this, EventArgs.Empty);
             }
-        });
+        }, isConnecting: !IsConnected);
     }
 
     public void RequestStop()
@@ -188,7 +216,8 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
-    private Task<bool> ExecuteAsync(Func<CancellationToken, Task> operation)
+    private Task<bool> ExecuteAsync(
+        Func<CancellationToken, Task> operation, bool isSigningIn = false, bool isConnecting = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_isBusy)
@@ -197,6 +226,8 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
 
         _isBusy = true;
+        _isSigningIn = isSigningIn;
+        _isConnecting = isConnecting;
         _errorMessage = "";
         _activeCancellation = new CancellationTokenSource();
         NotifyState();
@@ -229,6 +260,8 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
         finally
         {
             _isBusy = false;
+            _isSigningIn = false;
+            _isConnecting = false;
             _activeCancellation = null;
             cancellation.Dispose();
             NotifyState();
@@ -244,7 +277,9 @@ public sealed class ChatViewModel : INotifyPropertyChanged, IAsyncDisposable
     private void NotifyState()
     {
         foreach (var name in new[] { nameof(IsBusy), nameof(CanConfigure), nameof(CanSend),
-            nameof(IsConnected), nameof(CanDisconnect), nameof(ErrorMessage), nameof(Models),
+            nameof(IsSignedIn), nameof(IsConnected), nameof(CanSignIn), nameof(CanSignOut),
+            nameof(CanConnect), nameof(CanDisconnect), nameof(CanSetUp), nameof(SignInStatus),
+            nameof(ConnectionStatus), nameof(SetupActionText), nameof(SetupGuidance), nameof(ErrorMessage), nameof(Models),
             nameof(UserCode), nameof(VerificationUri), nameof(HasDeviceCode) })
         {
             Changed(name);

@@ -4,6 +4,163 @@ namespace PersonalDesktopHelper.Tests;
 
 public sealed class ChatViewModelTests
 {
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public async Task StartupConnectsOnlyWithSavedSignInAndUsesPersistedModel(bool signedIn, int expectedConnections)
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new Persistence.JsonStateStore(directory.StatePath);
+        store.SetCopilotSettings(new CopilotSettings { Model = "chosen-model" });
+        var loaded = new Persistence.JsonStateStore(directory.StatePath);
+        var connection = new FakeConnection { IsSignedIn = signedIn };
+        await using var chat = new ChatViewModel(
+            connection, loaded.State.Copilot, loaded.SetCopilotSettings, action => action());
+
+        await chat.ConnectOnStartupAsync();
+
+        Assert.Equal(expectedConnections, connection.ConnectCount);
+        Assert.Equal(signedIn, chat.IsConnected);
+        Assert.Equal("", chat.ErrorMessage);
+        if (signedIn)
+        {
+            Assert.Equal("chosen-model", connection.LastConnectSettings!.Model);
+            await chat.ConnectOnStartupAsync();
+            Assert.Equal(1, connection.ConnectCount);
+        }
+        else
+        {
+            Assert.True(chat.CanSignIn);
+        }
+    }
+
+    [Fact]
+    public async Task StartupConnectionFailureIsVisibleAndCanBeRetried()
+    {
+        var connection = new FakeConnection { ConnectError = new CopilotException("Network unavailable.") };
+        await using var chat = CreateChat(connection);
+
+        await chat.ConnectOnStartupAsync();
+
+        Assert.Equal("Network unavailable.", chat.ErrorMessage);
+        Assert.False(chat.IsConnected);
+        Assert.True(chat.CanConnect);
+        Assert.False(chat.IsBusy);
+    }
+
+    [Fact]
+    public async Task AuthenticationAndConnectionActionsFollowStateAndNotifyBindings()
+    {
+        var connection = new FakeConnection { IsSignedIn = false };
+        await using var chat = CreateChat(connection);
+        var changed = new HashSet<string?>();
+        chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+        chat.Prompt = "Draft";
+        Assert.True(chat.CanSignIn);
+        Assert.False(chat.CanSignOut);
+        Assert.False(chat.CanConnect);
+        Assert.False(chat.CanDisconnect);
+        Assert.False(chat.CanSend);
+        Assert.Equal("Not signed in", chat.SignInStatus);
+        Assert.Equal("Not connected", chat.ConnectionStatus);
+        Assert.Equal("Sign in", chat.SetupActionText);
+
+        Assert.True(await chat.SignInAsync());
+        Assert.True(chat.IsSignedIn);
+        Assert.True(chat.IsConnected);
+        Assert.False(chat.CanSignIn);
+        Assert.True(chat.CanSignOut);
+        Assert.False(chat.CanConnect);
+        Assert.True(chat.CanDisconnect);
+        Assert.True(chat.CanSend);
+        Assert.False(chat.CanSetUp);
+        Assert.Equal("Connected", chat.ConnectionStatus);
+
+        Assert.True(await chat.DisconnectAsync());
+        Assert.True(chat.IsSignedIn);
+        Assert.True(chat.CanConnect);
+        Assert.False(chat.CanDisconnect);
+        Assert.Equal("Connect", chat.SetupActionText);
+        Assert.Contains("saved sign-in", chat.SetupGuidance);
+        Assert.True(await chat.ConnectAsync());
+
+        Assert.True(await chat.SignOutAsync());
+        Assert.False(chat.IsSignedIn);
+        Assert.False(chat.IsConnected);
+        Assert.True(chat.CanSignIn);
+        Assert.False(chat.CanSend);
+        Assert.Equal("Draft", chat.Prompt);
+        Assert.Contains(nameof(chat.SignInStatus), changed);
+        Assert.Contains(nameof(chat.ConnectionStatus), changed);
+        Assert.Contains(nameof(chat.CanSignIn), changed);
+        Assert.Contains(nameof(chat.CanSignOut), changed);
+        Assert.Contains(nameof(chat.CanConnect), changed);
+        Assert.Contains(nameof(chat.SetupActionText), changed);
+    }
+
+    [Fact]
+    public async Task CancelledSignInClearsDeviceCodeAndRestoresSignInAction()
+    {
+        var connection = new FakeConnection
+        {
+            IsSignedIn = false,
+            SignInHandler = async (authorization, token) =>
+            {
+                authorization(new DeviceAuthorization("TEST", new Uri("https://github.com/login/device")));
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            }
+        };
+        await using var chat = CreateChat(connection);
+        var signingIn = chat.SignInAsync();
+        Assert.Equal("Signing in...", chat.SignInStatus);
+        Assert.True(chat.HasDeviceCode);
+        Assert.False(chat.CanSignIn);
+        Assert.False(chat.CanSignOut);
+        Assert.False(chat.CanConnect);
+        Assert.False(chat.CanDisconnect);
+        Assert.False(chat.CanSetUp);
+
+        chat.RequestStop();
+
+        Assert.False(await signingIn);
+        Assert.False(chat.HasDeviceCode);
+        Assert.False(chat.IsSignedIn);
+        Assert.True(chat.CanSignIn);
+        Assert.Equal("Not connected", chat.ConnectionStatus);
+    }
+
+    [Fact]
+    public async Task FailedConnectionPreservesSavedSignInAndAllowsRetry()
+    {
+        var connection = new FakeConnection
+        {
+            ConnectHandler = async token =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            }
+        };
+        await using var chat = CreateChat(connection);
+        var connecting = chat.ConnectAsync();
+        Assert.Equal("Connecting...", chat.ConnectionStatus);
+        Assert.Contains("Signed in", chat.SignInStatus);
+        Assert.False(chat.CanConnect);
+        Assert.False(chat.CanSignOut);
+        chat.RequestStop();
+        Assert.False(await connecting);
+        Assert.True(chat.CanConnect);
+        Assert.True(chat.CanSignOut);
+
+        var failing = new FakeConnection { ConnectError = new CopilotException("Network unavailable.") };
+        await using var failedChat = CreateChat(failing);
+        Assert.False(await failedChat.ConnectAsync());
+        Assert.True(failedChat.IsSignedIn);
+        Assert.False(failedChat.IsConnected);
+        Assert.True(failedChat.CanConnect);
+        Assert.True(failedChat.CanSignOut);
+        Assert.Equal("Not connected", failedChat.ConnectionStatus);
+        Assert.Equal("Network unavailable.", failedChat.ErrorMessage);
+    }
+
     [Fact]
     public async Task SendConnectsStreamsAndPreservesConversation()
     {
@@ -158,33 +315,53 @@ public sealed class ChatViewModelTests
     private static ChatViewModel CreateChat(FakeConnection connection) =>
         new(connection, new CopilotSettings(), _ => { }, action => action());
 
-    private sealed class FakeConnection : ICopilotConnection
+    internal sealed class FakeConnection : ICopilotConnection
     {
+        public bool IsSignedIn { get; set; } = true;
         public bool IsConnected { get; private set; }
-        public IReadOnlyList<string> Models => ["test-model"];
+        public IReadOnlyList<string> Models { get; init; } = ["test-model"];
+        public CopilotSettings? LastConnectSettings { get; private set; }
         public bool IsDisposed { get; private set; }
         public int ConnectCount { get; private set; }
         public int NewChatCount { get; private set; }
         public CopilotException? ConnectError { get; init; }
+        public Func<CancellationToken, Task>? ConnectHandler { get; init; }
+        public Func<Action<DeviceAuthorization>, CancellationToken, Task>? SignInHandler { get; init; }
         public Func<string, Action<string>, CancellationToken, Task<string>> SendHandler { get; set; } =
             (_, _, _) => Task.FromResult("Reply");
 
-        public Task<string> ConnectAsync(CopilotSettings settings, CancellationToken cancellationToken)
+        public async Task<string> ConnectAsync(CopilotSettings settings, CancellationToken cancellationToken)
         {
+            LastConnectSettings = settings;
             if (ConnectError is not null)
             {
                 throw ConnectError;
             }
 
             ConnectCount++;
+            if (ConnectHandler is not null)
+            {
+                await ConnectHandler(cancellationToken);
+            }
             IsConnected = true;
-            return Task.FromResult("Connected.");
+            return "Connected.";
         }
 
-        public Task<string> SignInAsync(CopilotSettings settings, Action<DeviceAuthorization> authorizationRequested, CancellationToken cancellationToken) =>
-            ConnectAsync(settings, cancellationToken);
+        public async Task<string> SignInAsync(CopilotSettings settings, Action<DeviceAuthorization> authorizationRequested, CancellationToken cancellationToken)
+        {
+            if (SignInHandler is not null)
+            {
+                await SignInHandler(authorizationRequested, cancellationToken);
+            }
+            IsSignedIn = true;
+            return await ConnectAsync(settings, cancellationToken);
+        }
 
-        public Task SignOutAsync() => DisconnectAsync();
+        public Task SignOutAsync()
+        {
+            IsSignedIn = false;
+            return DisconnectAsync();
+        }
 
         public Task<string> SendAsync(string prompt, Action<string> responseChanged, CancellationToken cancellationToken) =>
             SendHandler(prompt, responseChanged, cancellationToken);

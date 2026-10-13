@@ -8,6 +8,98 @@ namespace PersonalDesktopHelper.Tests;
 
 public sealed class CopilotHttpConnectionTests
 {
+    [Theory]
+    [InlineData(null, "/chat/completions")]
+    [InlineData("""["/chat/completions"]""", "/chat/completions")]
+    [InlineData("""["/responses","/chat/completions"]""", "/chat/completions")]
+    [InlineData("""["/responses"]""", "/responses")]
+    public async Task ModelEndpointMetadataSelectsTheSupportedProtocol(string? endpoints, string expectedPath)
+    {
+        using var http = CreateHttp((request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/copilot_internal/v2/token")
+            {
+                return Task.FromResult(AccessToken());
+            }
+            if (request.RequestUri.AbsolutePath == "/models")
+            {
+                var metadata = endpoints is null ? "" : $""","supported_endpoints":{endpoints}""";
+                return Task.FromResult(Json(
+                    $$"""{"data":[{"id":"test-model","capabilities":{"type":"chat"}{{metadata}}},{"id":"unsupported","capabilities":{"type":"chat"},"supported_endpoints":["/embeddings"]}]}"""));
+            }
+
+            Assert.Equal(expectedPath, request.RequestUri.AbsolutePath);
+            return Task.FromResult(expectedPath == "/responses" ? ResponseReply() : Completion("Reply"));
+        });
+        await using var connection = new CopilotHttpConnection(new MemoryCredentials { Token = "test" }, http);
+        await connection.ConnectAsync(new CopilotSettings(), CancellationToken.None);
+
+        Assert.Equal(["test-model"], connection.Models);
+        Assert.Equal("Reply", await connection.SendAsync("Hello", _ => { }, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ModelWithOnlyUnsupportedEndpointsCannotConnect()
+    {
+        using var http = CreateHttp((request, _) => Task.FromResult(
+            request.RequestUri!.AbsolutePath == "/copilot_internal/v2/token" ? AccessToken() :
+            Json("""{"data":[{"id":"unsupported","capabilities":{"type":"chat"},"supported_endpoints":["/embeddings"]}]}""")));
+        await using var connection = new CopilotHttpConnection(new MemoryCredentials { Token = "test" }, http);
+
+        await Assert.ThrowsAsync<CopilotException>(() =>
+            connection.ConnectAsync(new CopilotSettings { Model = "unsupported" }, CancellationToken.None));
+
+        Assert.False(connection.IsConnected);
+        Assert.Empty(connection.Models);
+    }
+
+    [Fact]
+    public async Task ResponsesConversationReplaysOriginalOutputAndNewChatClearsHistory()
+    {
+        const string output = """[{"type":"reasoning","id":"reason-1","encrypted_content":"opaque-reasoning","summary":[]},{"type":"message","role":"assistant","id":"msg-1","content":[{"type":"output_text","text":"Reply","annotations":[]}]}]""";
+        var requests = new List<JsonElement>();
+        using var http = CreateHttp(async (request, token) =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/copilot_internal/v2/token")
+            {
+                return AccessToken();
+            }
+            if (request.RequestUri.AbsolutePath == "/models")
+            {
+                return Json("""{"data":[{"id":"test-model","capabilities":{"type":"chat"},"supported_endpoints":["/responses"]}]}""");
+            }
+
+            Assert.Equal("/responses", request.RequestUri.AbsolutePath);
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+            requests.Add(body.RootElement.Clone());
+            return Json($$"""{"status":"completed","output":{{output}}}""");
+        });
+        await using var connection = new CopilotHttpConnection(new MemoryCredentials { Token = "test" }, http);
+        await connection.ConnectAsync(new CopilotSettings { AdditionalSystemPrompt = "Use brief replies." }, CancellationToken.None);
+
+        Assert.Equal("Reply", await connection.SendAsync("Hello", _ => { }, CancellationToken.None));
+        await connection.SendAsync("Follow up", _ => { }, CancellationToken.None);
+        await connection.NewChatAsync(CancellationToken.None);
+        await connection.SendAsync("Fresh chat", _ => { }, CancellationToken.None);
+
+        var first = requests[0];
+        Assert.Equal("test-model", first.GetProperty("model").GetString());
+        Assert.Equal(SystemPromptDefinition.Compose(SystemPromptDefinition.BuildConstant([]), "Use brief replies."),
+            first.GetProperty("instructions").GetString());
+        Assert.False(first.GetProperty("stream").GetBoolean());
+        Assert.False(first.GetProperty("store").GetBoolean());
+        Assert.Equal(["reasoning.encrypted_content"], first.GetProperty("include").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal("Hello", Assert.Single(first.GetProperty("input").EnumerateArray()).GetProperty("content").GetString());
+        var history = requests[1].GetProperty("input").EnumerateArray().ToArray();
+        Assert.Equal(4, history.Length);
+        Assert.Equal("user", history[0].GetProperty("role").GetString());
+        using var original = JsonDocument.Parse(output);
+        Assert.Equal(original.RootElement[0].GetRawText(), history[1].GetRawText());
+        Assert.Equal(original.RootElement[1].GetRawText(), history[2].GetRawText());
+        Assert.Equal("Follow up", history[3].GetProperty("content").GetString());
+        Assert.Equal("Fresh chat", Assert.Single(requests[2].GetProperty("input").EnumerateArray()).GetProperty("content").GetString());
+    }
+
     [Fact]
     public async Task ConnectExchangesCredentialFiltersModelsAndSendsConversationHistory()
     {
@@ -35,6 +127,8 @@ public sealed class CopilotHttpConnectionTests
             }
         });
         await using var connection = new CopilotHttpConnection(credential, http);
+        Assert.True(connection.IsSignedIn);
+        Assert.False(connection.IsConnected);
         Assert.Contains("test-model", await connection.ConnectAsync(new CopilotSettings(), CancellationToken.None));
         Assert.Equal(["test-model"], connection.Models);
         Assert.Equal("A reply", await connection.SendAsync("Hello", _ => { }, CancellationToken.None));
@@ -47,6 +141,14 @@ public sealed class CopilotHttpConnectionTests
         await connection.NewChatAsync(CancellationToken.None);
         await connection.SendAsync("Fresh chat", _ => { }, CancellationToken.None);
         Assert.Equal(2, requests[2].GetProperty("messages").GetArrayLength());
+        await connection.DisconnectAsync();
+        Assert.True(connection.IsSignedIn);
+        Assert.False(connection.IsConnected);
+        await connection.ConnectAsync(new CopilotSettings(), CancellationToken.None);
+        Assert.True(connection.IsConnected);
+        await connection.SignOutAsync();
+        Assert.False(connection.IsSignedIn);
+        Assert.False(connection.IsConnected);
     }
 
     [Fact]
@@ -108,6 +210,7 @@ public sealed class CopilotHttpConnectionTests
             _ => Models()
         }));
         await using var connection = new CopilotHttpConnection(credential, http);
+        Assert.False(connection.IsSignedIn);
 
         await connection.SignInAsync(new CopilotSettings(), value => challenge = value, CancellationToken.None);
 
@@ -115,9 +218,11 @@ public sealed class CopilotHttpConnectionTests
         Assert.Equal("github.com", challenge.VerificationUri.Host);
         Assert.Equal("test-oauth", credential.Token);
         Assert.Equal(2, polls);
+        Assert.True(connection.IsSignedIn);
         Assert.True(connection.IsConnected);
         await connection.SignOutAsync();
         Assert.Null(credential.Token);
+        Assert.False(connection.IsSignedIn);
         Assert.False(connection.IsConnected);
     }
 
@@ -134,6 +239,7 @@ public sealed class CopilotHttpConnectionTests
             new CopilotSettings(), _ => cancellation.Cancel(), cancellation.Token));
 
         Assert.Null(credential.Token);
+        Assert.False(connection.IsSignedIn);
     }
 
     [Fact]
@@ -236,6 +342,9 @@ public sealed class CopilotHttpConnectionTests
     private static HttpResponseMessage Completion(string content) =>
         Json(JsonSerializer.Serialize(new { choices = new[] { new { message = new { role = "assistant", content } } } }));
 
+    private static HttpResponseMessage ResponseReply() => Json(
+        """{"status":"completed","output":[{"type":"message","role":"assistant","id":"msg-1","content":[{"type":"output_text","text":"Reply"}]}]}""");
+
     private sealed class StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
@@ -245,6 +354,7 @@ public sealed class CopilotHttpConnectionTests
     private sealed class MemoryCredentials : ICopilotCredentialStore
     {
         public string? Token { get; set; }
+        public bool HasCredential => Token is not null;
         public string? Load() => Token;
         public void Save(string token) => Token = token;
         public void Clear() => Token = null;

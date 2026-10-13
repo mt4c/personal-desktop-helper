@@ -51,6 +51,18 @@ public partial class MainWindow : Window
     }
 
     private void OnStopClick(object sender, RoutedEventArgs e) => _chat.RequestStop();
+    private async void OnSetUpCopilotClick(object sender, RoutedEventArgs e)
+    {
+        if (_chat.CanConnect)
+        {
+            await _chat.ConnectAsync();
+        }
+        else if (_chat.CanSignIn)
+        {
+            _openOptions();
+        }
+    }
+
     private async void OnNewChatClick(object sender, RoutedEventArgs e) => await _chat.NewChatAsync();
     private void OnOptionsClick(object sender, RoutedEventArgs e) => _openOptions();
 }

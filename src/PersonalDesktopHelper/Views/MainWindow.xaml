@@ -4,61 +4,226 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="Personal Desktop Helper" Height="650" Width="900" MinHeight="450" MinWidth="650">
-    <Grid Margin="16">
+        Style="{StaticResource {x:Type Window}}"
+        Title="Personal Desktop Helper" Height="780" Width="980" MinHeight="600" MinWidth="720"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="28">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <DockPanel Margin="0,0,0,12">
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button Content="New chat" Padding="12,5" Margin="0,0,8,0"
+        <DockPanel Margin="0,0,0,22">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="New chat" Margin="0,0,8,0"
                         IsEnabled="{Binding CanConfigure}" Click="OnNewChatClick" />
-                <Button Content="Copilot options" Padding="12,5" Click="OnOptionsClick" />
+                <Button Content="Copilot options" Click="OnOptionsClick" />
             </StackPanel>
-            <StackPanel>
-                <TextBlock Text="GitHub Copilot" FontSize="20" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding Status}" Margin="0,4,12,0" Foreground="DimGray" TextWrapping="Wrap" />
-            </StackPanel>
+            <DockPanel Margin="0,0,16,0">
+                <Border DockPanel.Dock="Left" Background="{StaticResource AccentBrush}" CornerRadius="12"
+                        Width="48" Height="48" Margin="0,0,14,0" VerticalAlignment="Center">
+                    <TextBlock Text="DH" Foreground="White" FontSize="19" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel>
+                    <TextBlock Text="Desktop Helper" FontSize="26" FontWeight="SemiBold" />
+                    <TextBlock Text="A little help. A clearer day." Foreground="{StaticResource MutedTextBrush}" Margin="0,3,0,0" />
+                </StackPanel>
+            </DockPanel>
         </DockPanel>
-        <TextBlock Grid.Row="1" Text="{Binding ErrorMessage}" Foreground="Firebrick"
-                   TextWrapping="Wrap" Margin="0,0,0,8" />
-        <Border Grid.Row="2" BorderBrush="LightGray" BorderThickness="1" CornerRadius="4" Background="White">
-            <ScrollViewer x:Name="TranscriptScroll" VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl ItemsSource="{Binding Messages}" Margin="12">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border Background="#F3F5F7" CornerRadius="4" Padding="12" Margin="0,0,0,10">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Role}" FontWeight="SemiBold" Margin="0,0,0,6" />
-                                    <TextBox Text="{Binding Content, Mode=OneWay}" IsReadOnly="True"
-                                             TextWrapping="Wrap" BorderThickness="0" Padding="0"
-                                             Background="Transparent" IsReadOnlyCaretVisible="True" />
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
+        <Grid Grid.Row="1" Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border Style="{StaticResource CardStyle}" Padding="16,12" Margin="0,0,8,0">
+                <StackPanel>
+                    <TextBlock Text="GITHUB ACCOUNT" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock x:Name="SignInStatusText" Text="{Binding SignInStatus, StringFormat='GitHub: {0}'}"
+                               Margin="0,5,0,0" FontWeight="SemiBold" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+            <Border Grid.Column="1" Style="{StaticResource CardStyle}" Padding="16,12" Margin="8,0,0,0">
+                <StackPanel>
+                    <TextBlock Text="COPILOT CONNECTION" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
+                    <DockPanel Margin="0,5,0,0">
+                        <Ellipse Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="{StaticResource MutedTextBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                            <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock x:Name="ConnectionStatusText" Text="{Binding ConnectionStatus, StringFormat='Copilot: {0}'}"
+                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+        <StackPanel Grid.Row="2">
+            <Border x:Name="CopilotSetupBanner" Background="{StaticResource AccentSoftBrush}" CornerRadius="12"
+                    Padding="16" Margin="0,0,0,16">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <DockPanel>
+                    <Button x:Name="SetUpCopilotButton" DockPanel.Dock="Right" Margin="16,0,0,0"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Content="{Binding SetupActionText}" IsEnabled="{Binding CanSetUp}" Click="OnSetUpCopilotClick" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="Let's get you connected" FontWeight="SemiBold" Margin="0,0,0,3" />
+                        <TextBlock Text="{Binding SetupGuidance}" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource DangerBrush}"
+                       TextWrapping="Wrap" Margin="0,0,0,8" />
+        </StackPanel>
+        <Border Grid.Row="3" Style="{StaticResource CardStyle}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <DockPanel Margin="20,16">
+                    <TextBlock DockPanel.Dock="Right" Text="GitHub Copilot" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock Text="Conversation" FontWeight="SemiBold" />
+                </DockPanel>
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              VerticalContentAlignment="Center">
+                    <ScrollViewer.Style>
+                        <Style TargetType="ScrollViewer">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Messages.Count}" Value="0">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ScrollViewer.Style>
+                    <StackPanel HorizontalAlignment="Center" Margin="24">
+                        <TextBlock Text="What can I help with?" FontSize="24" FontWeight="SemiBold" TextAlignment="Center" />
+                        <TextBlock Text="Plan your day, set a reminder, or just ask a question."
+                                   Foreground="{StaticResource MutedTextBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,10,0,0" />
+                        <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="8" Padding="14,8" Margin="0,18,0,0"
+                                HorizontalAlignment="Center">
+                            <TextBlock Text="Try: Remind me to take a break in 30 minutes" FontSize="12"
+                                       Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" TextAlignment="Center" />
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+                <ScrollViewer x:Name="TranscriptScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ScrollViewer.Style>
+                        <Style TargetType="ScrollViewer">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Messages.Count}" Value="0">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ScrollViewer.Style>
+                    <ItemsControl x:Name="TranscriptMessages" ItemsSource="{Binding Messages}" Margin="20,0,20,12">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border CornerRadius="12" Padding="16" Margin="0,0,0,12" MaxWidth="760">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{StaticResource SubtleSurfaceBrush}" />
+                                            <Setter Property="HorizontalAlignment" Value="Left" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Role}" Value="You">
+                                                    <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
+                                                    <Setter Property="HorizontalAlignment" Value="Right" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Role}" FontWeight="SemiBold" FontSize="12"
+                                                   Foreground="{StaticResource AccentBrush}" Margin="0,0,0,8" />
+                                        <StackPanel x:Name="ResponseWaitingIndicator" Orientation="Horizontal"
+                                                    Visibility="Collapsed" MinHeight="24"
+                                                    AutomationProperties.LiveSetting="Polite">
+                                            <ProgressBar x:Name="ResponseWaitingProgress" Width="48" Height="4"
+                                                         VerticalAlignment="Center"
+                                                         Foreground="{StaticResource AccentBrush}"
+                                                         Background="{StaticResource BorderBrush}"
+                                                         AutomationProperties.Name="Waiting for Copilot response" />
+                                            <TextBlock Text="Waiting for Copilot..." Margin="12,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
+                                        </StackPanel>
+                                        <TextBox x:Name="ReplyContentText" Text="{Binding Content, Mode=OneWay}" IsReadOnly="True"
+                                                 TextWrapping="Wrap" BorderThickness="0" Padding="0"
+                                                 Background="Transparent" IsReadOnlyCaretVisible="True" />
+                                    </StackPanel>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding Role}" Value="Copilot" />
+                                            <Condition Binding="{Binding Content}" Value="" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter TargetName="ResponseWaitingIndicator" Property="Visibility" Value="Visible" />
+                                        <Setter TargetName="ResponseWaitingProgress" Property="IsIndeterminate" Value="True" />
+                                        <Setter TargetName="ReplyContentText" Property="Visibility" Value="Collapsed" />
+                                    </MultiDataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
         </Border>
-        <TextBox x:Name="PromptTextBox" Grid.Row="3" Margin="0,12,0,8" Padding="10"
-                 Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
-                 MinHeight="75" MaxHeight="180" AcceptsReturn="True" TextWrapping="Wrap"
-                 VerticalScrollBarVisibility="Auto" PreviewKeyDown="OnPromptKeyDown"
-                 IsEnabled="{Binding CanConfigure}" />
-        <DockPanel Grid.Row="4">
+        <Border Grid.Row="4" Style="{StaticResource CardStyle}" Margin="0,16,0,12" Padding="14,10">
+            <Grid>
+                <TextBox x:Name="PromptTextBox" Padding="2,6" BorderThickness="0" Background="Transparent"
+                         Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
+                         MinHeight="56" MaxHeight="130" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" PreviewKeyDown="OnPromptKeyDown"
+                         IsEnabled="{Binding CanConfigure}" AutomationProperties.Name="Message to Copilot" />
+                <TextBlock Text="Message Copilot..." Foreground="{StaticResource MutedTextBrush}" Margin="2,6"
+                           IsHitTestVisible="False">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Prompt}" Value="">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Grid>
+        </Border>
+        <DockPanel Grid.Row="5">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button Content="Stop" Padding="16,6" Margin="0,0,8,0"
+                <Button Content="Stop" Margin="0,0,8,0"
                         IsEnabled="{Binding IsBusy}" Click="OnStopClick" />
-                <Button Content="Send" Padding="16,6"
+                <Button Content="Send message" Style="{StaticResource PrimaryButtonStyle}"
                         IsEnabled="{Binding CanSend}" Click="OnSendClick" />
             </StackPanel>
-            <TextBlock Text="Enter to send; Shift+Enter for a new line. Chat stays in memory until Quit."
-                       Foreground="DimGray" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,12,0" />
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="{Binding Status}" FontSize="12" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                <TextBlock Text="Enter to send / Shift+Enter for a new line" FontSize="11"
+                           Foreground="{StaticResource MutedTextBrush}" Margin="0,3,0,0" TextWrapping="Wrap" />
+            </StackPanel>
         </DockPanel>
     </Grid>
 </Window>
